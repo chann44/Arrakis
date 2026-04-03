@@ -99,7 +99,7 @@ func (h *Handler) githubCallback(w http.ResponseWriter, r *http.Request) {
 		AvatarUrl: user.AvatarURL,
 	})
 	if err != nil {
-		http.Error(w, "failed to store github user", http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("failed to store github user: %v", err), http.StatusInternalServerError)
 		return
 	}
 

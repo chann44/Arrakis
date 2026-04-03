@@ -69,6 +69,16 @@
 			</Sidebar.Group>
 		</Sidebar.Content>
 		<Sidebar.Footer>
+			{#if data?.user}
+				<form method="POST" action="/auth/logout" class="mb-2">
+					<button
+						type="submit"
+						class="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-2 py-1.5 text-left text-[11px] text-sidebar-foreground hover:bg-sidebar-accent/70"
+					>
+						Logout
+					</button>
+				</form>
+			{/if}
 			<div class="rounded-md border border-sidebar-border bg-sidebar-accent px-2 py-1.5">
 				<p class="text-[10px] text-primary">v0.1.0 - self-hosted</p>
 				<div class="mt-1 flex items-center gap-1.5">
