@@ -3,14 +3,19 @@ package main
 import (
 	"context"
 	"errors"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/chann44/TGE/adapters"
+	internal "github.com/chann44/TGE/internals"
+	db "github.com/chann44/TGE/internals/db"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 func main() {
@@ -19,6 +24,27 @@ func main() {
 
 	port := "8080"
 	shutdownTimeout := time.Second * 5
+	cfg := internal.GetConfig()
+
+	postgresPool, err := adapters.NewPostgres(ctx, cfg)
+	if err != nil {
+		log.Fatalf("api: failed to initialize postgres: %v", err)
+	}
+	defer postgresPool.Close()
+	queries := db.New(postgresPool)
+
+	redisAddr := fmt.Sprintf("%s:%s", cfg.RedisHost, cfg.RedisPort)
+	redisClient, err := adapters.NewRedis(redisAddr, "", 0)
+	if err != nil {
+		log.Fatalf("api: failed to initialize redis: %v", err)
+	}
+	defer func() {
+		if err := redisClient.Close(); err != nil {
+			log.Printf("api: failed to close redis client: %v", err)
+		}
+	}()
+
+	handler := NewHandler(cfg, redisClient, queries)
 
 	r := chi.NewRouter()
 	r.Use(
@@ -27,15 +53,7 @@ func main() {
 		middleware.Logger,
 		middleware.Recoverer,
 	)
-
-	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-	r.Get("/v1/ping", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("pong"))
-	})
+	registerRoutes(r, handler)
 
 	srv := &http.Server{
 		Addr:              ":" + port,

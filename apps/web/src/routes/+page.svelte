@@ -1,9 +1,11 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { EcoBadge, RiskScore, StatCard, StatusBadge } from '$lib/components/security';
 	import { findings, repos, scans } from '$lib/data/security-mock';
 
 	const critical = findings.filter((f) => f.sev === 'critical').length;
 	const highRiskDeps = 4;
+	const isLoggedIn = $derived(Boolean(page.data.user));
 	const severity = [
 		{ label: 'critical', count: findings.filter((f) => f.sev === 'critical').length },
 		{ label: 'high', count: findings.filter((f) => f.sev === 'high').length },
@@ -16,20 +18,20 @@
 	<h1 class="soc-page-title">Dashboard</h1>
 
 	<section class="soc-grid-4">
-		<StatCard label="Repositories" value={repos.length} sub="connected" />
+		<StatCard label="Repositories" value={isLoggedIn ? repos.length : 0} sub="connected" />
 		<StatCard
 			label="Critical Findings"
-			value={critical}
+			value={isLoggedIn ? critical : 0}
 			sub="across all repos"
 			tone="soc-risk-critical"
 		/>
 		<StatCard
 			label="High Risk Deps"
-			value={highRiskDeps}
+			value={isLoggedIn ? highRiskDeps : 0}
 			sub="need attention"
 			tone="soc-risk-high"
 		/>
-		<StatCard label="Scans Today" value={12} sub="last: 2m ago" />
+		<StatCard label="Scans Today" value={isLoggedIn ? 12 : 0} sub="last: 2m ago" />
 	</section>
 
 	<section class="soc-grid-2">
@@ -52,10 +54,10 @@
 												? 'bg-amber-400'
 												: 'bg-emerald-400'
 								}`}
-								style={`width: ${(row.count / findings.length) * 100}%`}
+								style={`width: ${isLoggedIn ? (row.count / findings.length) * 100 : 0}%`}
 							></div>
 						</div>
-						<p class="w-5 text-right text-xs">{row.count}</p>
+						<p class="w-5 text-right text-xs">{isLoggedIn ? row.count : 0}</p>
 					</div>
 				{/each}
 			</div>
@@ -63,15 +65,19 @@
 
 		<div class="soc-section">
 			<div class="soc-section-head"><p class="soc-section-label">Policy Status</p></div>
-			<div class="space-y-2 p-3">
-				{#each repos as repo}
-					<div class="flex items-center gap-2 text-xs">
-						<p class="flex-1">{repo.name}</p>
-						<RiskScore value={repo.risk} />
-						<StatusBadge value={repo.policy} />
-					</div>
-				{/each}
-			</div>
+			{#if isLoggedIn}
+				<div class="space-y-2 p-3">
+					{#each repos as repo}
+						<div class="flex items-center gap-2 text-xs">
+							<p class="flex-1">{repo.name}</p>
+							<RiskScore value={repo.risk} />
+							<StatusBadge value={repo.policy} />
+						</div>
+					{/each}
+				</div>
+			{:else}
+				<p class="p-3 text-xs text-muted-foreground">Login to view policy status.</p>
+			{/if}
 		</div>
 	</section>
 
@@ -92,26 +98,34 @@
 				</tr>
 			</thead>
 			<tbody>
-				{#each scans.slice(0, 5) as scan}
+				{#if isLoggedIn}
+					{#each scans.slice(0, 5) as scan}
+						<tr>
+							<td class="text-[10px] text-primary">{scan.id}</td>
+							<td>{scan.repo}</td>
+							<td><EcoBadge value={scan.trigger} /></td>
+							<td class="soc-subtle">{scan.dur}</td>
+							<td>
+								<span
+									class={scan.findings > 5
+										? 'soc-risk-critical'
+										: scan.findings > 0
+											? 'soc-risk-high'
+											: 'soc-subtle'}
+								>
+									{scan.findings}
+								</span>
+							</td>
+							<td><StatusBadge value={scan.status} /></td>
+						</tr>
+					{/each}
+				{:else}
 					<tr>
-						<td class="text-[10px] text-primary">{scan.id}</td>
-						<td>{scan.repo}</td>
-						<td><EcoBadge value={scan.trigger} /></td>
-						<td class="soc-subtle">{scan.dur}</td>
-						<td>
-							<span
-								class={scan.findings > 5
-									? 'soc-risk-critical'
-									: scan.findings > 0
-										? 'soc-risk-high'
-										: 'soc-subtle'}
-							>
-								{scan.findings}
-							</span>
+						<td colspan="6" class="py-8 text-center text-xs text-muted-foreground">
+							Login to view recent scans.
 						</td>
-						<td><StatusBadge value={scan.status} /></td>
 					</tr>
-				{/each}
+				{/if}
 			</tbody>
 		</table>
 	</section>

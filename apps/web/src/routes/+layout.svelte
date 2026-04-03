@@ -15,7 +15,7 @@
 	import '@fontsource-variable/inter';
 	import './layout.css';
 
-	let { children } = $props();
+	let { children, data } = $props();
 
 	const navItems = [
 		{ href: '/', label: 'Dashboard', icon: Home01Icon },
@@ -86,6 +86,31 @@
 		>
 			<Sidebar.Trigger class="md:hidden" />
 			<p class="text-xs font-medium">{page.url.pathname}</p>
+			<div class="ml-auto flex items-center gap-2">
+				{#if data?.user}
+					{#if data.user.avatarUrl}
+						<img
+							src={data.user.avatarUrl}
+							alt={data.user.login}
+							class="h-7 w-7 rounded-full border border-border object-cover"
+						/>
+					{:else}
+						<div
+							class="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-primary text-[10px] font-semibold text-primary-foreground uppercase"
+						>
+							{data.user.login.slice(0, 1)}
+						</div>
+					{/if}
+					<span class="text-xs text-muted-foreground">{data.user.login}</span>
+				{:else}
+					<a
+						href="/auth"
+						class="rounded-md border border-primary bg-primary px-3 py-1 text-xs text-primary-foreground"
+					>
+						Login
+					</a>
+				{/if}
+			</div>
 		</header>
 		<div class="p-3 md:p-4">
 			{@render children()}
