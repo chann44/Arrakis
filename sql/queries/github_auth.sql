@@ -85,3 +85,33 @@ SELECT id, user_id, github_repo_id, name, full_name, private, default_branch, ht
 FROM repositories
 WHERE user_id = $1
 ORDER BY name;
+
+-- name: UpsertUserGitHubInstallation :exec
+INSERT INTO user_github_installations (
+    user_id,
+    installation_id,
+    app_slug,
+    account_login,
+    account_type,
+    html_url
+) VALUES (
+    $1,
+    $2,
+    $3,
+    $4,
+    $5,
+    $6
+)
+ON CONFLICT (user_id, installation_id)
+DO UPDATE SET
+    app_slug = EXCLUDED.app_slug,
+    account_login = EXCLUDED.account_login,
+    account_type = EXCLUDED.account_type,
+    html_url = EXCLUDED.html_url,
+    updated_at = NOW();
+
+-- name: ListUserGitHubInstallations :many
+SELECT id, user_id, installation_id, app_slug, account_login, account_type, html_url, created_at, updated_at
+FROM user_github_installations
+WHERE user_id = $1
+ORDER BY updated_at DESC;

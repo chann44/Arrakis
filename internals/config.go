@@ -8,17 +8,21 @@ import (
 )
 
 type Config struct {
-	DBHost             string
-	DBPort             string
-	DBUser             string
-	DBPassword         string
-	DBName             string
-	RedisHost          string
-	RedisPort          string
-	FrontendURL        string
-	GithubClientID     string
-	GithubClientSecret string
-	GithubRedirectURI  string
+	DBHost              string
+	DBPort              string
+	DBUser              string
+	DBPassword          string
+	DBName              string
+	RedisHost           string
+	RedisPort           string
+	FrontendURL         string
+	GithubClientID      string
+	GithubClientSecret  string
+	GithubRedirectURI   string
+	GithubAppID         string
+	GithubAppPrivateKey string
+	GithubAppSlug       string
+	GithubAppInstallURL string
 }
 
 var cfg *Config
@@ -32,17 +36,21 @@ func init() {
 func GetConfig() *Config {
 	if cfg == nil {
 		cfg = &Config{
-			DBHost:             os.Getenv("DB_HOST"),
-			DBPort:             os.Getenv("DB_PORT"),
-			DBUser:             os.Getenv("DB_USER"),
-			DBPassword:         os.Getenv("DB_PASSWORD"),
-			DBName:             os.Getenv("DB_NAME"),
-			RedisHost:          os.Getenv("REDIS_HOST"),
-			RedisPort:          os.Getenv("REDIS_PORT"),
-			FrontendURL:        os.Getenv("FRONTEND_URL"),
-			GithubClientID:     os.Getenv("GITHUB_CLIENT_ID"),
-			GithubClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
-			GithubRedirectURI:  os.Getenv("GITHUB_REDIRECT_URI"),
+			DBHost:              os.Getenv("DB_HOST"),
+			DBPort:              os.Getenv("DB_PORT"),
+			DBUser:              os.Getenv("DB_USER"),
+			DBPassword:          os.Getenv("DB_PASSWORD"),
+			DBName:              os.Getenv("DB_NAME"),
+			RedisHost:           os.Getenv("REDIS_HOST"),
+			RedisPort:           os.Getenv("REDIS_PORT"),
+			FrontendURL:         os.Getenv("FRONTEND_URL"),
+			GithubClientID:      os.Getenv("GITHUB_CLIENT_ID"),
+			GithubClientSecret:  os.Getenv("GITHUB_CLIENT_SECRET"),
+			GithubRedirectURI:   os.Getenv("GITHUB_REDIRECT_URI"),
+			GithubAppID:         os.Getenv("GITHUB_APP_ID"),
+			GithubAppPrivateKey: os.Getenv("GITHUB_APP_PRIVATE_KEY"),
+			GithubAppSlug:       os.Getenv("GITHUB_APP_SLUG"),
+			GithubAppInstallURL: os.Getenv("GITHUB_APP_INSTALL_URL"),
 		}
 
 		if cfg.FrontendURL == "" {

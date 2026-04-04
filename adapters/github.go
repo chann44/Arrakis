@@ -14,6 +14,7 @@ import (
 const (
 	githubAccessTokenURL = "https://github.com/login/oauth/access_token"
 	githubAPIBaseURL     = "https://api.github.com"
+	githubHTTPTimeout    = 30 * time.Second
 )
 
 type GitHubUser struct {
@@ -25,12 +26,17 @@ type GitHubUser struct {
 }
 
 type GitHubRepository struct {
-	ID              int64  `json:"id"`
-	Name            string `json:"name"`
-	FullName        string `json:"full_name"`
-	Private         bool   `json:"private"`
-	DefaultBranch   string `json:"default_branch"`
-	HTMLURL         string `json:"html_url"`
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	FullName      string `json:"full_name"`
+	Private       bool   `json:"private"`
+	DefaultBranch string `json:"default_branch"`
+	HTMLURL       string `json:"html_url"`
+	Owner         struct {
+		ID    int64  `json:"id"`
+		Login string `json:"login"`
+		Type  string `json:"type"`
+	} `json:"owner"`
 	Description     string `json:"description"`
 	Language        string `json:"language"`
 	StargazersCount int    `json:"stargazers_count"`
@@ -72,6 +78,10 @@ func newGitHubAPIError(resp *http.Response) error {
 	return &GitHubAPIError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 }
 
+func newGitHubHTTPClient() *http.Client {
+	return &http.Client{Timeout: githubHTTPTimeout}
+}
+
 func ExchangeGitHubCode(ctx context.Context, clientID, clientSecret, code, redirectURI string) (string, error) {
 	form := url.Values{}
 	form.Set("client_id", clientID)
@@ -88,7 +98,7 @@ func ExchangeGitHubCode(ctx context.Context, clientID, clientSecret, code, redir
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := newGitHubHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("exchange github code: %w", err)
@@ -123,7 +133,7 @@ func GetGitHubUser(ctx context.Context, accessToken string) (*GitHubUser, error)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := newGitHubHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch github user: %w", err)
@@ -158,7 +168,7 @@ func GetGitHubPrimaryEmail(ctx context.Context, accessToken string) (string, err
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := newGitHubHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("fetch github user emails: %w", err)
@@ -189,7 +199,7 @@ func GetGitHubPrimaryEmail(ctx context.Context, accessToken string) (string, err
 }
 
 func ListGitHubUserRepositories(ctx context.Context, accessToken string) ([]GitHubRepository, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := newGitHubHTTPClient()
 	repositories := make([]GitHubRepository, 0)
 
 	for page := 1; ; page++ {

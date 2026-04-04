@@ -32,6 +32,18 @@ type User struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type UserGithubInstallation struct {
+	ID             int64              `json:"id"`
+	UserID         int64              `json:"user_id"`
+	InstallationID int64              `json:"installation_id"`
+	AppSlug        string             `json:"app_slug"`
+	AccountLogin   string             `json:"account_login"`
+	AccountType    string             `json:"account_type"`
+	HtmlUrl        string             `json:"html_url"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type UserOauthToken struct {
 	ID          int64              `json:"id"`
 	UserID      int64              `json:"user_id"`

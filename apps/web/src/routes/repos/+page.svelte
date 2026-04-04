@@ -1,13 +1,65 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import type { PageData } from './$types';
 
-	let { data }: { data: PageData } = $props();
+	let { data, form }: { data: PageData; form: any } = $props();
+
+	$effect(() => {
+		if (!browser) return;
+		if (form && typeof form === 'object' && 'installRedirect' in form && form.installRedirect) {
+			window.location.href = form.installRedirect;
+		}
+	});
+
+	const prevHref = $derived(
+		data.page > 1 ? `/repos?page=${data.page - 1}&page_size=${data.pageSize}` : ''
+	);
+	const nextHref = $derived(
+		data.totalPages > 0 && data.page < data.totalPages
+			? `/repos?page=${data.page + 1}&page_size=${data.pageSize}`
+			: ''
+	);
 </script>
 
 <div class="soc-page">
+	{#if data.connected}
+		<section class="soc-section mb-3 border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-800">
+			Repository connected successfully.
+		</section>
+	{/if}
+
+	{#if form && typeof form === 'object' && 'message' in form && form.message}
+		<section class="soc-section mb-3 border border-rose-300 bg-rose-50 p-3 text-xs text-rose-800">
+			{form.message}
+		</section>
+	{/if}
+
+	{#if data.appSetup === 'repo_not_granted'}
+		<section class="soc-section mb-3 border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+			GitHub App is installed but the selected repository is not granted. In the GitHub installation page,
+			select this repository, then click Connect again.
+		</section>
+	{:else if data.appSetup === 'state_expired'}
+		<section class="soc-section mb-3 border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+			Install session expired. Please click Connect again.
+		</section>
+	{:else if data.appSetup && data.appSetup !== 'installed'}
+		<section class="soc-section mb-3 border border-rose-300 bg-rose-50 p-3 text-xs text-rose-800">
+			GitHub App setup status: {data.appSetup}. Please try Connect again.
+		</section>
+	{/if}
+
 	<div class="flex items-center justify-between">
 		<h1 class="soc-page-title">Repositories</h1>
-		<span class="soc-subtle">{data.repositories.length} found on GitHub</span>
+		<div class="flex items-center gap-2">
+			<span class="soc-subtle">
+				Showing {data.repositories.length} of {data.total} (page {data.page}
+				{#if data.totalPages > 0} / {data.totalPages}{/if})
+			</span>
+			<a class="soc-btn-primary" href="http://localhost:8080/v1/auth/github/app/install">
+				Install GitHub App
+			</a>
+		</div>
 	</div>
 
 	<section class="soc-section">
@@ -44,14 +96,14 @@
 							</span>
 						</td>
 						<td>
-							{#if repo.connected}
-								<button class="soc-btn" type="button" disabled>Connected</button>
-							{:else}
-								<form method="POST" action="?/connect">
-									<input type="hidden" name="repoId" value={repo.id} />
+							<form method="POST" action="?/connect" class="inline-block">
+								<input type="hidden" name="repoId" value={repo.id} />
+								{#if repo.connected}
+									<button class="soc-btn" type="submit">Configure</button>
+								{:else}
 									<button class="soc-btn-primary" type="submit">Connect</button>
-								</form>
-							{/if}
+								{/if}
+							</form>
 							<a class="soc-btn ml-2" href={repo.html_url} target="_blank" rel="noreferrer">GitHub</a>
 						</td>
 					</tr>
@@ -60,4 +112,18 @@
 			</tbody>
 		</table>
 	</section>
+
+	<div class="mt-3 flex items-center justify-end gap-2 text-xs">
+		{#if prevHref}
+			<a class="soc-btn" href={prevHref}>Previous</a>
+		{:else}
+			<button class="soc-btn" type="button" disabled>Previous</button>
+		{/if}
+
+		{#if nextHref}
+			<a class="soc-btn" href={nextHref}>Next</a>
+		{:else}
+			<button class="soc-btn" type="button" disabled>Next</button>
+		{/if}
+	</div>
 </div>

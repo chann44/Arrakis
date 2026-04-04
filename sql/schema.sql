@@ -32,3 +32,16 @@ CREATE TABLE IF NOT EXISTS repositories (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (user_id, github_repo_id)
 );
+
+CREATE TABLE IF NOT EXISTS user_github_installations (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    installation_id BIGINT NOT NULL,
+    app_slug TEXT NOT NULL DEFAULT '',
+    account_login TEXT NOT NULL DEFAULT '',
+    account_type TEXT NOT NULL DEFAULT '',
+    html_url TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, installation_id)
+);

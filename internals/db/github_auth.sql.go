@@ -69,6 +69,43 @@ func (q *Queries) GetUserOAuthToken(ctx context.Context, arg GetUserOAuthTokenPa
 	return i, err
 }
 
+const listUserGitHubInstallations = `-- name: ListUserGitHubInstallations :many
+SELECT id, user_id, installation_id, app_slug, account_login, account_type, html_url, created_at, updated_at
+FROM user_github_installations
+WHERE user_id = $1
+ORDER BY updated_at DESC
+`
+
+func (q *Queries) ListUserGitHubInstallations(ctx context.Context, userID int64) ([]UserGithubInstallation, error) {
+	rows, err := q.db.Query(ctx, listUserGitHubInstallations, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UserGithubInstallation
+	for rows.Next() {
+		var i UserGithubInstallation
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.InstallationID,
+			&i.AppSlug,
+			&i.AccountLogin,
+			&i.AccountType,
+			&i.HtmlUrl,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserRepositories = `-- name: ListUserRepositories :many
 SELECT id, user_id, github_repo_id, name, full_name, private, default_branch, html_url, created_at, updated_at
 FROM repositories
@@ -207,6 +244,52 @@ func (q *Queries) UpsertRepository(ctx context.Context, arg UpsertRepositoryPara
 		arg.FullName,
 		arg.Private,
 		arg.DefaultBranch,
+		arg.HtmlUrl,
+	)
+	return err
+}
+
+const upsertUserGitHubInstallation = `-- name: UpsertUserGitHubInstallation :exec
+INSERT INTO user_github_installations (
+    user_id,
+    installation_id,
+    app_slug,
+    account_login,
+    account_type,
+    html_url
+) VALUES (
+    $1,
+    $2,
+    $3,
+    $4,
+    $5,
+    $6
+)
+ON CONFLICT (user_id, installation_id)
+DO UPDATE SET
+    app_slug = EXCLUDED.app_slug,
+    account_login = EXCLUDED.account_login,
+    account_type = EXCLUDED.account_type,
+    html_url = EXCLUDED.html_url,
+    updated_at = NOW()
+`
+
+type UpsertUserGitHubInstallationParams struct {
+	UserID         int64  `json:"user_id"`
+	InstallationID int64  `json:"installation_id"`
+	AppSlug        string `json:"app_slug"`
+	AccountLogin   string `json:"account_login"`
+	AccountType    string `json:"account_type"`
+	HtmlUrl        string `json:"html_url"`
+}
+
+func (q *Queries) UpsertUserGitHubInstallation(ctx context.Context, arg UpsertUserGitHubInstallationParams) error {
+	_, err := q.db.Exec(ctx, upsertUserGitHubInstallation,
+		arg.UserID,
+		arg.InstallationID,
+		arg.AppSlug,
+		arg.AccountLogin,
+		arg.AccountType,
 		arg.HtmlUrl,
 	)
 	return err
