@@ -1,25 +1,15 @@
 <script lang="ts">
-	import {
-		Background,
-		Controls,
-		MarkerType,
-		MiniMap,
-		SvelteFlow,
-		type Edge as FlowEdge,
-		type Node as FlowNode
-	} from '@xyflow/svelte';
-	import '@xyflow/svelte/dist/style.css';
+	import DependencyGraph from '$lib/components/repos/DependencyGraph.svelte';
 	import type { PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: any } = $props();
 	let tab = $state<'dependency-files' | 'dependencies'>('dependency-files');
 	let dependenciesView = $state<'table' | 'graph'>('table');
 	let selectedGraphNodeId = $state<string>('');
+	let expandedTopNodeId = $state<string>('');
 	let graphFilterPeer = $state<boolean>(true);
 	let graphFilterDev = $state<boolean>(true);
 	let graphFilterOptional = $state<boolean>(true);
-	let flowNodes = $state.raw<FlowNode[]>([]);
-	let flowEdges = $state.raw<FlowEdge[]>([]);
 
 	type GraphNode = {
 		id: string;
@@ -41,6 +31,8 @@
 		lastUpdated: string;
 		iconUrl: string;
 		iconLabel: string;
+		isCluster?: boolean;
+		clusterCount?: number;
 	};
 
 	type GraphEdge = {
@@ -99,10 +91,9 @@
 			return { nodes: [] as GraphNode[], edges: [] as GraphEdge[], width: 900, height: 260, rootId: '' };
 		}
 
+		const maxVisibleDepth = 32;
+
 		const maxRenderedNodes = 1400;
-		const depthGap = 320;
-		const laneGap = 108;
-		const blockGap = 96;
 		const horizontalPadding = 80;
 		const verticalPadding = 48;
 
@@ -119,65 +110,92 @@
 			}
 		};
 
-		const byDepth = new Map<number, GraphNode[]>();
 		const nodesById = new Map<string, GraphNode>();
-		const rootDepthNameIndex = new Map<string, string>();
-		let firstRootId = '';
-		let currentBlockTop = verticalPadding;
+		const byDepth = new Map<number, GraphNode[]>();
+		const topDepthNameIndex = new Map<string, string>();
+
+		const projectName = data.repo?.name || 'Project';
+		const projectID = `project:${projectName}`;
+		const projectNode: GraphNode = {
+			id: projectID,
+			name: projectName,
+			depth: 0,
+			x: 0,
+			y: 0,
+			latestVersion: '',
+			versionSpec: '',
+			dependencyType: 'root',
+			registry: '-',
+			manager: '-',
+			creator: '',
+			description: 'Repository root',
+			license: '',
+			homepage: '',
+			repositoryUrl: data.repo?.html_url || '',
+			registryUrl: '',
+			lastUpdated: '',
+			iconUrl: '',
+			iconLabel: 'R'
+		};
+		nodesById.set(projectID, projectNode);
+		byDepth.set(0, [projectNode]);
+
 		let maxDepthSeen = 1;
 
 		for (const dep of deps as any[]) {
 			if (nodesById.size >= maxRenderedNodes) break;
 
-			const rootId = `root:${dep.name}:${dep.latest_version || dep.version_spec || '-'}`;
-			if (!firstRootId) firstRootId = rootId;
-			const root: GraphNode = {
-				id: rootId,
-				name: dep.name,
-				depth: 0,
-				x: 0,
-				y: 0,
-				latestVersion: dep.latest_version || '-',
-				versionSpec: dep.version_spec || '-',
-				dependencyType: 'root',
-				registry: dep.registry || '-',
-				manager: dep.manager || '-',
-				creator: dep.creator || '-',
-				description: dep.description || '',
-				license: dep.license || '-',
-				homepage: dep.homepage || '',
-				repositoryUrl: dep.repository_url || '',
-				registryUrl: dep.registry_url || '',
-				lastUpdated: dep.last_updated || '',
-				iconUrl: faviconFromUrl(dep.registry_url || dep.repository_url || ''),
-				iconLabel: iconLabelForManager(dep.manager)
-			};
-			nodesById.set(root.id, root);
-			if (!byDepth.has(0)) byDepth.set(0, []);
-			byDepth.get(0)?.push(root);
-			rootDepthNameIndex.set(`${rootId}|0|${dep.name}`, root.id);
+			const topID = `top:${dep.name}:${dep.latest_version || dep.version_spec || '-'}`;
+			if (!nodesById.has(topID)) {
+				const topNode: GraphNode = {
+					id: topID,
+					name: dep.name,
+					depth: 1,
+					x: 0,
+					y: 0,
+					latestVersion: dep.latest_version || '-',
+					versionSpec: dep.version_spec || '-',
+					dependencyType: 'direct',
+					registry: dep.registry || '-',
+					manager: dep.manager || '-',
+					creator: dep.creator || '-',
+					description: dep.description || '',
+					license: dep.license || '-',
+					homepage: dep.homepage || '',
+					repositoryUrl: dep.repository_url || '',
+					registryUrl: dep.registry_url || '',
+					lastUpdated: dep.last_updated || '',
+					iconUrl: faviconFromUrl(dep.registry_url || dep.repository_url || ''),
+					iconLabel: iconLabelForManager(dep.manager)
+				};
+				nodesById.set(topID, topNode);
+				if (!byDepth.has(1)) byDepth.set(1, []);
+				byDepth.get(1)?.push(topNode);
+				topDepthNameIndex.set(`${topID}|1|${dep.name}`, topID);
+			}
 
 			const filteredChildren = (dep.dependency_graph ?? []).filter((child: any) =>
 				shouldIncludeByType(child.dependency_type || 'default')
 			);
-			const localByDepth = new Map<number, GraphNode[]>();
 
 			for (const child of filteredChildren) {
 				if (nodesById.size >= maxRenderedNodes) break;
 
-				const depth = Math.max(1, Number(child.depth || 1));
+				const absDepth = Math.max(2, Number(child.depth || 1) + 1);
+				if (absDepth > maxDepthSeen) maxDepthSeen = absDepth;
+
 				const depType = child.dependency_type || 'default';
-				const id = `${rootId}:${depth}:${depType}:${child.parent || dep.name}:${child.name}:${child.latest_version || child.version_spec || '-'}`;
-				if (!nodesById.has(id)) {
+				const childID = `${topID}:${absDepth}:${depType}:${child.parent || dep.name}:${child.name}:${child.latest_version || child.version_spec || '-'}`;
+				if (!nodesById.has(childID)) {
 					const node: GraphNode = {
-						id,
+						id: childID,
 						name: child.name,
-						depth,
+						depth: absDepth,
 						x: 0,
 						y: 0,
 						latestVersion: child.latest_version || '-',
 						versionSpec: child.version_spec || '-',
-						dependencyType: child.dependency_type || 'default',
+						dependencyType: depType,
 						registry: child.registry || '-',
 						manager: child.manager || '-',
 						creator: child.creator || '-',
@@ -190,65 +208,93 @@
 						iconUrl: faviconFromUrl(child.registry_url || child.repository_url || ''),
 						iconLabel: iconLabelForManager(child.manager)
 					};
-					nodesById.set(id, node);
-					if (!byDepth.has(depth)) byDepth.set(depth, []);
-					byDepth.get(depth)?.push(node);
-					if (!localByDepth.has(depth)) localByDepth.set(depth, []);
-					localByDepth.get(depth)?.push(node);
-					if (!rootDepthNameIndex.has(`${rootId}|${depth}|${child.name}`)) {
-						rootDepthNameIndex.set(`${rootId}|${depth}|${child.name}`, node.id);
+					nodesById.set(childID, node);
+					if (!byDepth.has(absDepth)) byDepth.set(absDepth, []);
+					byDepth.get(absDepth)?.push(node);
+					if (!topDepthNameIndex.has(`${topID}|${absDepth}|${child.name}`)) {
+						topDepthNameIndex.set(`${topID}|${absDepth}|${child.name}`, childID);
 					}
 				}
 			}
+		}
 
-			const localDepths = [0, ...localByDepth.keys()];
-			const localMaxDepth = Math.max(1, ...localDepths);
-			if (localMaxDepth > maxDepthSeen) maxDepthSeen = localMaxDepth;
-			const localTallest = Math.max(1, ...(localDepths.map((d) => (d === 0 ? 1 : (localByDepth.get(d)?.length ?? 0)))));
-			const blockHeight = Math.max(190, localTallest * laneGap + 84);
+		const laneGapX = 190;
+		const laneGapY = 92;
+		const bandGapY = 130;
+		const maxColsDepth1 = 7;
+		const maxColsOther = 9;
 
-			for (const depth of localDepths) {
-				const depthNodes = depth === 0 ? [root] : (localByDepth.get(depth) ?? []);
-				depthNodes.sort((a, b) => {
-					if (a.dependencyType !== b.dependencyType) {
-						return a.dependencyType.localeCompare(b.dependencyType);
-					}
-					return a.name.localeCompare(b.name);
-				});
+		const sortedDepths = [...byDepth.keys()].sort((a, b) => a - b);
+		let yCursor = verticalPadding + 16;
+		let widestRow = 1;
 
-				const localColumnHeight = (depthNodes.length - 1) * laneGap;
-				const startY = currentBlockTop + Math.max(26, (blockHeight-localColumnHeight) / 2);
-				depthNodes.forEach((node, idx) => {
-					node.x = horizontalPadding + depth * depthGap + (depth % 2 === 0 ? 0 : 10);
-					node.y = startY + idx * laneGap;
+		for (const depth of sortedDepths) {
+			const nodes = byDepth.get(depth) ?? [];
+			nodes.sort((a, b) => {
+				if (a.dependencyType !== b.dependencyType) {
+					return a.dependencyType.localeCompare(b.dependencyType);
+				}
+				return a.name.localeCompare(b.name);
+			});
+
+			if (depth === 0) {
+				nodes[0].x = 0;
+				nodes[0].y = yCursor;
+				yCursor += bandGapY;
+				continue;
+			}
+
+			const maxCols = depth === 1 ? maxColsDepth1 : maxColsOther;
+			const rows = Math.max(1, Math.ceil(nodes.length / maxCols));
+			for (let row = 0; row < rows; row++) {
+				const from = row * maxCols;
+				const to = Math.min(nodes.length, from + maxCols);
+				const rowNodes = nodes.slice(from, to);
+				widestRow = Math.max(widestRow, rowNodes.length);
+				const rowWidth = (rowNodes.length - 1) * laneGapX;
+				const rowStartX = -rowWidth / 2;
+				rowNodes.forEach((node, col) => {
+					node.x = rowStartX + col * laneGapX;
+					node.y = yCursor + row * laneGapY;
 				});
 			}
 
-			root.x = horizontalPadding;
-			root.y = currentBlockTop + blockHeight / 2;
-			currentBlockTop += blockHeight + blockGap;
-
+			yCursor += rows * laneGapY + bandGapY;
 		}
 
-		const widthHint = horizontalPadding * 2 + (maxDepthSeen + 1) * depthGap;
-		const width = Math.max(1200, widthHint);
-		const height = Math.max(640, currentBlockTop + verticalPadding);
+		const width = Math.max(1300, horizontalPadding * 2 + Math.max(1, widestRow - 1) * laneGapX);
+		const height = Math.max(700, yCursor + verticalPadding);
+
+		for (const nodes of byDepth.values()) {
+			for (const node of nodes) {
+				node.x += width / 2;
+			}
+		}
 
 		const edges: GraphEdge[] = [];
 		for (const dep of deps as any[]) {
-			const rootId = `root:${dep.name}:${dep.latest_version || dep.version_spec || '-'}`;
+			const topID = `top:${dep.name}:${dep.latest_version || dep.version_spec || '-'}`;
+			if (!nodesById.has(topID)) continue;
+
+			edges.push({
+				id: `${projectID}->${topID}`,
+				from: projectID,
+				to: topID,
+				dependencyType: 'direct'
+			});
+
 			const filteredChildren = (dep.dependency_graph ?? []).filter((child: any) =>
 				shouldIncludeByType(child.dependency_type || 'default')
 			);
 			for (const child of filteredChildren) {
-				const depth = Math.max(1, Number(child.depth || 1));
+				const depth = Math.max(2, Number(child.depth || 1) + 1);
 				const depType = child.dependency_type || 'default';
-				const childId = `${rootId}:${depth}:${depType}:${child.parent || dep.name}:${child.name}:${child.latest_version || child.version_spec || '-'}`;
+				const childId = `${topID}:${depth}:${depType}:${child.parent || dep.name}:${child.name}:${child.latest_version || child.version_spec || '-'}`;
 				if (!nodesById.has(childId)) continue;
 
-				let from = rootId;
-				if (depth > 1) {
-					const indexedParent = rootDepthNameIndex.get(`${rootId}|${depth - 1}|${child.parent}`);
+				let from = topID;
+				if (depth > 2) {
+					const indexedParent = topDepthNameIndex.get(`${topID}|${depth - 1}|${child.parent}`);
 					if (indexedParent) from = indexedParent;
 				}
 				edges.push({
@@ -260,134 +306,119 @@
 			}
 		}
 
-		return { nodes: [...nodesById.values()], edges, width, height, rootId: firstRootId };
+		const fullNodes = [...nodesById.values()];
+		const visibleNodes = fullNodes.filter((node) => node.depth <= maxVisibleDepth);
+		const visibleNodeIDs = new Set(visibleNodes.map((node) => node.id));
+
+		const outgoingByFrom = new Map<string, GraphEdge[]>();
+		for (const edge of edges) {
+			if (!outgoingByFrom.has(edge.from)) {
+				outgoingByFrom.set(edge.from, []);
+			}
+			outgoingByFrom.get(edge.from)?.push(edge);
+		}
+
+		const filteredEdges = edges.filter((edge) => visibleNodeIDs.has(edge.from) && visibleNodeIDs.has(edge.to));
+
+		return {
+			nodes: visibleNodes,
+			edges: filteredEdges,
+			width,
+			height,
+			rootId: projectID
+		};
+	});
+
+	const displayedGraphModel = $derived.by(() => {
+		const base = graphModel;
+		if (!expandedTopNodeId) {
+			const nodes = base.nodes.filter((node) => node.depth <= 1);
+			const ids = new Set(nodes.map((n) => n.id));
+			const edges = base.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to));
+			return { ...base, nodes, edges };
+		}
+
+		const edgeMap = new Map<string, GraphEdge[]>();
+		for (const edge of base.edges) {
+			if (!edgeMap.has(edge.from)) edgeMap.set(edge.from, []);
+			edgeMap.get(edge.from)?.push(edge);
+		}
+
+		const keepNodeIDs = new Set<string>();
+		for (const node of base.nodes) {
+			if (node.depth <= 1) keepNodeIDs.add(node.id);
+		}
+		const queue = [expandedTopNodeId];
+		while (queue.length > 0) {
+			const current = queue.shift() as string;
+			if (keepNodeIDs.has(current)) {
+				for (const edge of edgeMap.get(current) ?? []) {
+					if (!keepNodeIDs.has(edge.to)) queue.push(edge.to);
+				}
+				continue;
+			}
+			keepNodeIDs.add(current);
+			for (const edge of edgeMap.get(current) ?? []) {
+				if (!keepNodeIDs.has(edge.to)) queue.push(edge.to);
+			}
+		}
+
+		const nodes = base.nodes.filter((node) => keepNodeIDs.has(node.id));
+		const edges = base.edges.filter((edge) => keepNodeIDs.has(edge.from) && keepNodeIDs.has(edge.to));
+		return { ...base, nodes, edges };
 	});
 
 	const selectedGraphNode = $derived.by(() => {
-		const { nodes } = graphModel;
+		const { nodes } = displayedGraphModel;
 		if (nodes.length === 0 || !selectedGraphNodeId) return null;
 		return nodes.find((n) => n.id === selectedGraphNodeId) ?? null;
 	});
 
-	const highlightedGraphPath = $derived.by(() => {
-		const selected = selectedGraphNode;
-		const { edges, nodes } = graphModel;
-		const highlightedNodeIds = new Set<string>();
-		const highlightedEdgeIds = new Set<string>();
-		if (!selected) {
-			return { highlightedNodeIds, highlightedEdgeIds };
-		}
-
-		const nodeByID = new Map(nodes.map((node) => [node.id, node]));
-
-		const edgesByTo = new Map<string, GraphEdge[]>();
-		for (const edge of edges) {
-			if (!edgesByTo.has(edge.to)) {
-				edgesByTo.set(edge.to, []);
-			}
-			edgesByTo.get(edge.to)?.push(edge);
-		}
-
-		let current = selected.id;
-		highlightedNodeIds.add(current);
-		while ((nodeByID.get(current)?.depth ?? 0) > 0) {
-			const incoming = edgesByTo.get(current);
-			if (!incoming || incoming.length === 0) break;
-			const edge = incoming[0];
-			highlightedEdgeIds.add(edge.id);
-			highlightedNodeIds.add(edge.from);
-			current = edge.from;
-		}
-
-		return { highlightedNodeIds, highlightedEdgeIds };
-	});
-
 	$effect(() => {
-		const { nodes } = graphModel;
+		const { nodes } = displayedGraphModel;
 		if (nodes.length === 0) {
 			selectedGraphNodeId = '';
+			expandedTopNodeId = '';
 			return;
 		}
 		if (selectedGraphNodeId && !nodes.some((node) => node.id === selectedGraphNodeId)) {
 			selectedGraphNodeId = '';
 		}
+		if (expandedTopNodeId && !nodes.some((node) => node.id === expandedTopNodeId)) {
+			expandedTopNodeId = '';
+		}
 	});
 
 	function resetGraphViewport() {
 		selectedGraphNodeId = '';
+		expandedTopNodeId = '';
 	}
 
-	const flowGraphNodes = $derived.by(() =>
-		graphModel.nodes.map((node) => {
-			const highlighted = highlightedGraphPath.highlightedNodeIds.has(node.id);
-			const selected = selectedGraphNodeId === node.id;
-			const labelPrefix = node.iconLabel ? `${node.iconLabel} ` : '';
-			return {
-				id: node.id,
-				position: { x: node.x, y: node.y },
-				data: { label: `${labelPrefix}${node.name}` },
-				type: 'default',
-				draggable: false,
-				selectable: true,
-				style: `background: var(--color-primary); color: var(--color-primary-foreground); border: 2px solid ${selected ? 'var(--color-foreground)' : highlighted ? nodeStroke(node.dependencyType) : 'var(--color-primary)'}; border-radius: 10px; opacity: ${selectedGraphNodeId ? (highlighted ? 1 : 0.55) : 1}; font-size: 11px; font-weight: 600; padding: 8px 10px; min-width: 130px;`
-			} satisfies FlowNode;
-		})
+	const pixiGraphNodes = $derived.by(() =>
+		displayedGraphModel.nodes.map((node) => ({
+			id: node.id,
+			label: node.name,
+			type: node.dependencyType
+		}))
 	);
 
-	const flowGraphEdges = $derived.by(() =>
-		graphModel.edges.map((edge) => {
-			const highlighted = highlightedGraphPath.highlightedEdgeIds.has(edge.id);
-			return {
-				id: edge.id,
-				source: edge.from,
-				target: edge.to,
-				type: 'smoothstep',
-				animated: highlighted,
-				markerEnd: {
-					type: MarkerType.ArrowClosed,
-					color: highlighted ? 'var(--color-primary)' : edgeStroke(edge.dependencyType)
-				},
-				style: `stroke: ${highlighted ? 'var(--color-primary)' : edgeStroke(edge.dependencyType)}; stroke-width: ${highlighted ? 2.8 : 1.5}; opacity: ${selectedGraphNodeId ? (highlighted ? 1 : 0.35) : 0.95}; ${edge.dependencyType === 'peer' ? 'stroke-dasharray: 4 3;' : ''}`
-			} satisfies FlowEdge;
-		})
+	const pixiGraphEdges = $derived.by(() =>
+		displayedGraphModel.edges.map((edge) => ({
+			source: edge.from,
+			target: edge.to,
+			type: edge.dependencyType
+		}))
 	);
 
-	$effect(() => {
-		flowNodes = flowGraphNodes;
-		flowEdges = flowGraphEdges;
-	});
-
-	function onFlowNodeClick(event: { node: { id: string } }) {
-		selectedGraphNodeId = event.node.id;
+	function onGraphNodeClick(event: CustomEvent<{ nodeId: string }>) {
+		const nodeId = event.detail.nodeId;
+		selectedGraphNodeId = nodeId;
+		if (nodeId.startsWith('top:')) {
+			expandedTopNodeId = expandedTopNodeId === nodeId ? '' : nodeId;
+		} else if (nodeId.startsWith('project:')) {
+			expandedTopNodeId = '';
+		}
 	}
-
-	const nodeStroke = (dependencyType: string): string => {
-		switch (dependencyType) {
-			case 'peer':
-				return '#f59e0b';
-			case 'dev':
-				return '#38bdf8';
-			case 'optional':
-				return '#22c55e';
-			case 'root':
-				return '#111827';
-			default:
-				return 'var(--color-primary)';
-		}
-	};
-
-	const edgeStroke = (dependencyType: string): string => {
-		switch (dependencyType) {
-			case 'peer':
-				return '#f59e0b';
-			case 'dev':
-				return '#0ea5e9';
-			case 'optional':
-				return '#22c55e';
-			default:
-				return '#94a3b8';
-		}
-	};
 </script>
 
 <div class="soc-page">
@@ -552,11 +583,13 @@
 									optional
 								</button>
 								<span class="rounded border border-border bg-muted px-2 py-1 text-[11px]">
-									{graphModel.nodes.length} nodes / {graphModel.edges.length} edges
+									{displayedGraphModel.nodes.length} nodes / {displayedGraphModel.edges.length} edges
 								</span>
-								<span class="rounded border border-amber-300/50 bg-amber-100/10 px-2 py-1 text-[11px] text-amber-700">peer</span>
-								<span class="rounded border border-sky-300/50 bg-sky-100/10 px-2 py-1 text-[11px] text-sky-700">dev</span>
-								<span class="rounded border border-emerald-300/50 bg-emerald-100/10 px-2 py-1 text-[11px] text-emerald-700">optional</span>
+								{#if expandedTopNodeId}
+									<span class="rounded border border-border bg-muted px-2 py-1 text-[11px]">Expanded branch</span>
+								{:else}
+									<span class="rounded border border-border bg-muted px-2 py-1 text-[11px]">Click top-level dependency to expand</span>
+								{/if}
 							</div>
 						{/if}
 					</div>
@@ -564,41 +597,19 @@
 					{#if (data.dependencies?.length ?? 0) === 0}
 						<p class="soc-subtle">No dependencies extracted yet.</p>
 					{:else if dependenciesView === 'graph'}
-						{#if graphModel.nodes.length === 0}
+						{#if displayedGraphModel.nodes.length === 0}
 							<p class="soc-subtle">No graph data available yet for dependencies.</p>
 						{:else}
 							<div class="relative">
 								<div
-									class="repo-flow h-[74vh] overflow-hidden rounded border border-border bg-gradient-to-b from-background via-background to-muted/20 p-2 shadow-inner ring-1 ring-primary/15"
+									class="repo-flow h-[74vh] overflow-hidden rounded border border-border bg-card p-2"
 								>
-									<SvelteFlow
-										bind:nodes={flowNodes}
-										bind:edges={flowEdges}
-										fitView
-										fitViewOptions={{ padding: 0.28, minZoom: 0.2, maxZoom: 1.8 }}
-										onnodeclick={onFlowNodeClick}
-										proOptions={{ hideAttribution: true }}
-										colorMode="dark"
-										panOnScroll
-										selectionOnDrag
-									>
-										<Background bgColor="transparent" patternColor="var(--color-border)" gap={20} />
-										<MiniMap
-											zoomable
-											pannable
-											bgColor="var(--color-card)"
-											nodeColor={(node) => {
-												const id = String(node.id);
-												if (id.includes(':peer:')) return '#f59e0b';
-												if (id.includes(':dev:')) return '#0ea5e9';
-												if (id.includes(':optional:')) return '#22c55e';
-												return 'var(--color-primary)';
-											}}
-											maskColor="color-mix(in oklab, var(--color-primary) 16%, transparent)"
-											maskStrokeColor="var(--color-primary)"
-										/>
-										<Controls showLock={false} class="repo-flow-controls" />
-									</SvelteFlow>
+									<DependencyGraph
+										nodes={pixiGraphNodes}
+										edges={pixiGraphEdges}
+										rootId={displayedGraphModel.rootId}
+										on:nodeclick={onGraphNodeClick}
+									/>
 								</div>
 								{#if selectedGraphNode}
 									<div class="absolute right-3 top-3 w-80 rounded border border-border bg-muted/90 p-3 text-xs shadow-lg backdrop-blur">
@@ -767,28 +778,3 @@
 		{/if}
 	{/if}
 </div>
-
-<style>
-	:global(.repo-flow .svelte-flow__node) {
-		box-shadow: 0 6px 20px color-mix(in oklab, var(--color-primary) 20%, transparent);
-		transition: box-shadow 140ms ease, transform 140ms ease;
-	}
-
-	:global(.repo-flow .svelte-flow__node:hover) {
-		box-shadow: 0 10px 26px color-mix(in oklab, var(--color-primary) 28%, transparent);
-		transform: translateY(-1px);
-	}
-
-	:global(.repo-flow .svelte-flow__controls) {
-		border: 1px solid var(--color-border);
-		background: color-mix(in oklab, var(--color-card) 88%, transparent);
-		border-radius: 10px;
-		overflow: hidden;
-	}
-
-	:global(.repo-flow .svelte-flow__controls button) {
-		background: transparent;
-		color: var(--color-foreground);
-		border-color: var(--color-border);
-	}
-</style>
