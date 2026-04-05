@@ -45,6 +45,13 @@ func main() {
 		}
 	}()
 
+	clickhouseClient, err := adapters.NewClickHouse(ctx, cfg)
+	if err != nil {
+		log.Printf("api: clickhouse unavailable, logs API degraded: %v", err)
+	}
+	centralLogger := adapters.NewCentralLogger(clickhouseClient, "api")
+	centralLogger.Log(ctx, "api", "info", "api process started", map[string]any{"port": port})
+
 	asynqClient := asynq.NewClient(asynq.RedisClientOpt{Addr: redisAddr})
 	defer func() {
 		if err := asynqClient.Close(); err != nil {
@@ -52,7 +59,7 @@ func main() {
 		}
 	}()
 
-	handler := NewHandler(cfg, redisClient, queries, asynqClient)
+	handler := NewHandler(cfg, redisClient, clickhouseClient, centralLogger, postgresPool, queries, asynqClient)
 
 	r := chi.NewRouter()
 	r.Use(
@@ -60,6 +67,7 @@ func main() {
 		middleware.RealIP,
 		middleware.Logger,
 		middleware.Recoverer,
+		requestAuditMiddleware(centralLogger),
 	)
 	registerRoutes(r, handler)
 

@@ -54,6 +54,13 @@ end
 	return r.client.Eval(ctx, script, []string{key}, expectedValue).Err()
 }
 
+func (r *Redis) Ping(ctx context.Context) error {
+	if r == nil || r.client == nil {
+		return fmt.Errorf("redis client is not initialized")
+	}
+	return r.client.Ping(ctx).Err()
+}
+
 func (r *Redis) Close() error {
 	if r == nil || r.client == nil {
 		return nil

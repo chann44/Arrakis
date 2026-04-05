@@ -22,6 +22,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func generateState() (string, error) {
@@ -35,6 +36,9 @@ func generateState() (string, error) {
 type Handler struct {
 	cfg         *internal.Config
 	redis       *adapters.Redis
+	clickhouse  *adapters.ClickHouse
+	logger      *adapters.CentralLogger
+	postgres    *pgxpool.Pool
 	queries     *db.Queries
 	asynqClient *asynq.Client
 }
@@ -96,8 +100,8 @@ type dependencyFilesResponse struct {
 	Files        []dependencyFileResponse `json:"files"`
 }
 
-func NewHandler(cfg *internal.Config, redisClient *adapters.Redis, queries *db.Queries, asynqClient *asynq.Client) *Handler {
-	return &Handler{cfg: cfg, redis: redisClient, queries: queries, asynqClient: asynqClient}
+func NewHandler(cfg *internal.Config, redisClient *adapters.Redis, clickhouseClient *adapters.ClickHouse, logger *adapters.CentralLogger, postgresPool *pgxpool.Pool, queries *db.Queries, asynqClient *asynq.Client) *Handler {
+	return &Handler{cfg: cfg, redis: redisClient, clickhouse: clickhouseClient, logger: logger, postgres: postgresPool, queries: queries, asynqClient: asynqClient}
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -108,10 +112,18 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 
 func (h *Handler) requestLog(r *http.Request, format string, args ...any) {
 	prefix := "api"
-	if requestID := middleware.GetReqID(r.Context()); requestID != "" {
-		prefix = fmt.Sprintf("api request_id=%s", requestID)
+	requestID := ""
+	if rid := middleware.GetReqID(r.Context()); rid != "" {
+		prefix = fmt.Sprintf("api request_id=%s", rid)
+		requestID = rid
 	}
-	log.Printf("%s %s", prefix, fmt.Sprintf(format, args...))
+	message := fmt.Sprintf(format, args...)
+	log.Printf("%s %s", prefix, message)
+	h.logger.Log(r.Context(), "api", "info", message, map[string]any{
+		"path":       r.URL.Path,
+		"method":     r.Method,
+		"request_id": requestID,
+	})
 }
 
 func (h *Handler) getGitHubAccessToken(ctx context.Context, userID int64) (string, error) {

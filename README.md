@@ -47,10 +47,20 @@ git clone git@github.com:chann44/TGE.git
 cd TGE
 
 cp .env.example .env
-docker-compose up --build
+docker compose -f deployments/dev.compose.yml up -d
 ```
 
 API: `http://localhost:8080`
+
+For system-health log streaming, set these `.env` values:
+
+```bash
+CLICKHOUSE_HOST=localhost
+CLICKHOUSE_PORT=9000
+CLICKHOUSE_USER=default
+CLICKHOUSE_PASSWORD=clickhouse
+CLICKHOUSE_DATABASE=default
+```
 
 ## 📌 Roadmap
 

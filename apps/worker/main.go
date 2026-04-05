@@ -17,6 +17,13 @@ import (
 	"github.com/hibiken/asynq"
 )
 
+func writeWorkerLog(ctx context.Context, logger *adapters.CentralLogger, level, message string, metadata map[string]any) {
+	if logger == nil {
+		return
+	}
+	logger.Log(ctx, "worker", level, message, metadata)
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -40,6 +47,13 @@ func main() {
 			log.Printf("worker: failed to close redis client: %v", closeErr)
 		}
 	}()
+
+	clickhouseClient, err := adapters.NewClickHouse(ctx, cfg)
+	if err != nil {
+		log.Printf("worker: clickhouse unavailable, live logs disabled: %v", err)
+	}
+	centralLogger := adapters.NewCentralLogger(clickhouseClient, "worker")
+	centralLogger.Log(ctx, "worker", "info", "worker process started", map[string]any{"queue": "dependencies"})
 
 	srv := asynq.NewServer(
 		asynq.RedisClientOpt{Addr: redisAddr},
@@ -72,6 +86,10 @@ func main() {
 				})
 			}
 			log.Printf("worker skip dependency sync repo_id=%d sync_id=%d reason=locked", payload.RepoID, payload.SyncID)
+			writeWorkerLog(ctx, centralLogger, "warn", "dependency sync skipped because repository lock is held", map[string]any{
+				"repo_id": payload.RepoID,
+				"sync_id": payload.SyncID,
+			})
 			return nil
 		}
 		defer func() {
@@ -80,11 +98,28 @@ func main() {
 
 		started := time.Now()
 		log.Printf("worker start dependency sync repo_id=%d sync_id=%d trigger=%s", payload.RepoID, payload.SyncID, payload.Trigger)
+		writeWorkerLog(ctx, centralLogger, "info", "dependency sync started", map[string]any{
+			"repo_id": payload.RepoID,
+			"sync_id": payload.SyncID,
+			"trigger": payload.Trigger,
+		})
 		if err := services.SyncRepositoryDependencies(ctx, queries, cfg, payload.UserID, payload.RepoID, payload.SyncID, payload.Trigger, payload.Force); err != nil {
 			log.Printf("worker dependency sync failed repo_id=%d sync_id=%d err=%v", payload.RepoID, payload.SyncID, err)
+			writeWorkerLog(ctx, centralLogger, "error", "dependency sync failed", map[string]any{
+				"repo_id": payload.RepoID,
+				"sync_id": payload.SyncID,
+				"error":   err.Error(),
+			})
 			return err
 		}
 		log.Printf("worker dependency sync complete repo_id=%d sync_id=%d duration=%s", payload.RepoID, payload.SyncID, time.Since(started).String())
+		writeWorkerLog(ctx, centralLogger, "info", "dependency sync completed", map[string]any{
+			"repo_id":      payload.RepoID,
+			"sync_id":      payload.SyncID,
+			"duration":     time.Since(started).String(),
+			"trigger":      payload.Trigger,
+			"requested_by": payload.UserID,
+		})
 		return nil
 	})
 

@@ -13,6 +13,11 @@ type Config struct {
 	DBUser              string
 	DBPassword          string
 	DBName              string
+	ClickHouseHost      string
+	ClickHousePort      string
+	ClickHouseUser      string
+	ClickHousePassword  string
+	ClickHouseDatabase  string
 	RedisHost           string
 	RedisPort           string
 	FrontendURL         string
@@ -41,6 +46,11 @@ func GetConfig() *Config {
 			DBUser:              os.Getenv("DB_USER"),
 			DBPassword:          os.Getenv("DB_PASSWORD"),
 			DBName:              os.Getenv("DB_NAME"),
+			ClickHouseHost:      os.Getenv("CLICKHOUSE_HOST"),
+			ClickHousePort:      os.Getenv("CLICKHOUSE_PORT"),
+			ClickHouseUser:      os.Getenv("CLICKHOUSE_USER"),
+			ClickHousePassword:  os.Getenv("CLICKHOUSE_PASSWORD"),
+			ClickHouseDatabase:  os.Getenv("CLICKHOUSE_DATABASE"),
 			RedisHost:           os.Getenv("REDIS_HOST"),
 			RedisPort:           os.Getenv("REDIS_PORT"),
 			FrontendURL:         os.Getenv("FRONTEND_URL"),
@@ -55,6 +65,21 @@ func GetConfig() *Config {
 
 		if cfg.FrontendURL == "" {
 			cfg.FrontendURL = "http://localhost:5173"
+		}
+		if cfg.ClickHouseHost == "" {
+			cfg.ClickHouseHost = "localhost"
+		}
+		if cfg.ClickHousePort == "" {
+			cfg.ClickHousePort = "9000"
+		}
+		if cfg.ClickHouseUser == "" {
+			cfg.ClickHouseUser = "default"
+		}
+		if cfg.ClickHousePassword == "" {
+			cfg.ClickHousePassword = "clickhouse"
+		}
+		if cfg.ClickHouseDatabase == "" {
+			cfg.ClickHouseDatabase = "default"
 		}
 	}
 	return cfg

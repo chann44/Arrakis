@@ -91,6 +91,17 @@ type RepositoryDependencySync struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ServiceStatusSnapshot struct {
+	ID        int64              `json:"id"`
+	Service   string             `json:"service"`
+	Status    string             `json:"status"`
+	LatencyMs int32              `json:"latency_ms"`
+	UptimePct float64            `json:"uptime_pct"`
+	Note      string             `json:"note"`
+	CheckedAt pgtype.Timestamptz `json:"checked_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type User struct {
 	ID        int64              `json:"id"`
 	GithubID  int64              `json:"github_id"`

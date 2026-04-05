@@ -48,22 +48,38 @@ codegen:
 
 migrate-up:
 	@set -e; \
-	set -a; . ./.env; set +a; \
+	DATABASE_URL=$${DATABASE_URL:-$$(python3 scripts/get_database_url.py)}; \
+	if [ -z "$$DATABASE_URL" ]; then \
+		echo "DATABASE_URL is required (export it or set it in .env)"; \
+		exit 1; \
+	fi; \
 	goose -dir $(GOOSE_DIR) postgres "$$DATABASE_URL?sslmode=disable" up
 
 migrate-down:
 	@set -e; \
-	set -a; . ./.env; set +a; \
+	DATABASE_URL=$${DATABASE_URL:-$$(python3 scripts/get_database_url.py)}; \
+	if [ -z "$$DATABASE_URL" ]; then \
+		echo "DATABASE_URL is required (export it or set it in .env)"; \
+		exit 1; \
+	fi; \
 	goose -dir $(GOOSE_DIR) postgres "$$DATABASE_URL?sslmode=disable" down
 
 migrate-status:
 	@set -e; \
-	set -a; . ./.env; set +a; \
+	DATABASE_URL=$${DATABASE_URL:-$$(python3 scripts/get_database_url.py)}; \
+	if [ -z "$$DATABASE_URL" ]; then \
+		echo "DATABASE_URL is required (export it or set it in .env)"; \
+		exit 1; \
+	fi; \
 	goose -dir $(GOOSE_DIR) postgres "$$DATABASE_URL?sslmode=disable" status
 
 migrate-reset:
 	@set -e; \
-	set -a; . ./.env; set +a; \
+	DATABASE_URL=$${DATABASE_URL:-$$(python3 scripts/get_database_url.py)}; \
+	if [ -z "$$DATABASE_URL" ]; then \
+		echo "DATABASE_URL is required (export it or set it in .env)"; \
+		exit 1; \
+	fi; \
 	goose -dir $(GOOSE_DIR) postgres "$$DATABASE_URL?sslmode=disable" reset
 
 migrate-create:

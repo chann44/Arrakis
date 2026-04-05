@@ -26,6 +26,12 @@ func registerRoutes(r chi.Router, h *Handler) {
 		r.Group(func(r chi.Router) {
 			r.Use(h.authMiddleware)
 			r.Get("/me", h.me)
+			r.Get("/system-health/summary", h.systemHealthSummary)
+			r.Get("/system-health/services", h.systemHealthServices)
+			r.Get("/system-health/queues", h.systemHealthQueues)
+			r.Get("/system-health/logs", h.systemHealthLogs)
+			r.Get("/system-health/logs/stream", h.systemHealthLogsStream)
+			r.Get("/system-health/logs/services", h.systemHealthLogServices)
 			r.Get("/github/repositories", h.githubRepositories)
 			r.Get("/github/repositories/{repoID}", h.githubRepositoryByID)
 			r.Get("/github/repositories/{repoID}/dependency-files", h.githubRepositoryDependencyFiles)
