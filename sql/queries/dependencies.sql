@@ -135,6 +135,15 @@ INSERT INTO repository_dependency_syncs (
 )
 RETURNING id, repository_id, status, trigger, error_message, started_at, finished_at, created_at, updated_at;
 
+-- name: MarkRepositoryDependencySyncRunning :exec
+UPDATE repository_dependency_syncs
+SET status = 'running',
+    error_message = '',
+    started_at = NOW(),
+    finished_at = NULL,
+    updated_at = NOW()
+WHERE id = $1;
+
 -- name: MarkRepositoryDependencySyncSuccess :exec
 UPDATE repository_dependency_syncs
 SET status = 'success',
@@ -158,11 +167,47 @@ WHERE repository_id = $1
 ORDER BY started_at DESC
 LIMIT 1;
 
+-- name: ListActiveRepositoryDependencySync :many
+SELECT id, repository_id, status, trigger, error_message, started_at, finished_at, created_at, updated_at
+FROM repository_dependency_syncs
+WHERE repository_id = $1
+  AND status IN ('queued', 'running')
+ORDER BY started_at DESC
+LIMIT 1;
+
 -- name: ListRepositoryDependencyFiles :many
 SELECT id, repository_id, path, file, manager, registry, created_at, updated_at
 FROM repository_dependency_files
 WHERE repository_id = $1
 ORDER BY path;
+
+-- name: CountRepositoryDependencyFilesByRepo :one
+SELECT COUNT(*)
+FROM repository_dependency_files
+WHERE repository_id = $1;
+
+-- name: CountRepositoryDependenciesByRepo :one
+SELECT COUNT(*)
+FROM repository_dependencies
+WHERE repository_id = $1;
+
+-- name: GetDependencyPackageByKey :one
+SELECT id, manager, registry, normalized_name, display_name, created_at, updated_at
+FROM dependency_packages
+WHERE manager = $1
+  AND registry = $2
+  AND normalized_name = $3;
+
+-- name: GetDependencyPackageVersionByPackageAndVersion :one
+SELECT id, package_id, version, creator, description, license, homepage, repository_url, registry_url, released_at, created_at, updated_at
+FROM dependency_package_versions
+WHERE package_id = $1
+  AND version = $2;
+
+-- name: CountDependencyEdgesByFromVersion :one
+SELECT COUNT(*)
+FROM dependency_version_dependencies
+WHERE from_version_id = $1;
 
 -- name: ListRepositoryDependenciesDetailed :many
 SELECT

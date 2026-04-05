@@ -288,41 +288,59 @@ func queryInt(raw string, fallback int) int {
 	return v
 }
 
-func (h *Handler) enqueueDependencySync(ctx context.Context, userID, repoID int64, trigger string, force bool) error {
+func (h *Handler) enqueueDependencySync(ctx context.Context, userID, repoID int64, trigger string, force bool) (int64, error) {
 	if h.asynqClient == nil {
-		return fmt.Errorf("background queue is not configured")
+		return 0, fmt.Errorf("background queue is not configured")
+	}
+
+	if !force {
+		activeSync, err := h.queries.ListActiveRepositoryDependencySync(ctx, repoID)
+		if err == nil && len(activeSync) > 0 {
+			return activeSync[0].ID, nil
+		}
+	}
+
+	syncRow, err := h.queries.CreateRepositoryDependencySync(ctx, db.CreateRepositoryDependencySyncParams{
+		RepositoryID: repoID,
+		Status:       "queued",
+		Trigger:      trigger,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("create dependency sync row: %w", err)
 	}
 
 	task, err := jobs.NewDependencySyncTask(jobs.DependencySyncPayload{
+		SyncID:  syncRow.ID,
 		UserID:  userID,
 		RepoID:  repoID,
 		Trigger: trigger,
 		Force:   force,
 	})
 	if err != nil {
-		return err
+		_ = h.queries.MarkRepositoryDependencySyncFailed(ctx, db.MarkRepositoryDependencySyncFailedParams{ID: syncRow.ID, ErrorMessage: "failed to marshal queue payload"})
+		return 0, err
 	}
 
-	taskID := fmt.Sprintf("deps:%d:%d", userID, repoID)
-	if force {
-		taskID = fmt.Sprintf("deps:%d:%d:%d", userID, repoID, time.Now().UnixNano())
-	}
+	taskID := fmt.Sprintf("deps:%d:%d:%d", userID, repoID, syncRow.ID)
 
 	_, err = h.asynqClient.EnqueueContext(
 		ctx,
 		task,
 		asynq.Queue("dependencies"),
 		asynq.TaskID(taskID),
+		asynq.Unique(20*time.Minute),
 		asynq.MaxRetry(5),
 		asynq.Timeout(30*time.Minute),
 	)
 	if err != nil {
 		if errors.Is(err, asynq.ErrTaskIDConflict) {
-			return nil
+			_ = h.queries.MarkRepositoryDependencySyncFailed(ctx, db.MarkRepositoryDependencySyncFailedParams{ID: syncRow.ID, ErrorMessage: "task already queued"})
+			return syncRow.ID, nil
 		}
-		return err
+		_ = h.queries.MarkRepositoryDependencySyncFailed(ctx, db.MarkRepositoryDependencySyncFailedParams{ID: syncRow.ID, ErrorMessage: "failed to enqueue task"})
+		return 0, err
 	}
-	return nil
+	return syncRow.ID, nil
 }
 
 func (h *Handler) githubLogin(w http.ResponseWriter, r *http.Request) {
@@ -552,7 +570,7 @@ storeDone:
 		http.Redirect(w, r, h.frontendRedirect("/repos", map[string]string{"app_setup": "connect_failed"}), http.StatusTemporaryRedirect)
 		return
 	}
-	if err := h.enqueueDependencySync(r.Context(), connectState.UserID, repository.ID, "connect", false); err != nil {
+	if _, err := h.enqueueDependencySync(r.Context(), connectState.UserID, repository.ID, "connect", false); err != nil {
 		h.requestLog(r, "github app setup failed enqueueing dependency sync user_id=%d repo_id=%d error=%v", connectState.UserID, repository.ID, err)
 	}
 	h.requestLog(r, "github app setup connected repo user_id=%d repo_id=%d installation_id=%d", connectState.UserID, repository.ID, installationID)
@@ -951,6 +969,11 @@ func (h *Handler) fetchRepositoryDependencies(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	force := false
+	if rawForce := strings.TrimSpace(r.URL.Query().Get("force")); rawForce != "" {
+		force = strings.EqualFold(rawForce, "true") || rawForce == "1"
+	}
+
 	connectedRepos, err := h.queries.ListUserRepositories(r.Context(), userID)
 	if err != nil {
 		http.Error(w, "failed to fetch connected repositories", http.StatusInternalServerError)
@@ -969,7 +992,23 @@ func (h *Handler) fetchRepositoryDependencies(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if err := h.enqueueDependencySync(r.Context(), userID, repoID, "manual", true); err != nil {
+	if !force {
+		depCount, depErr := h.queries.CountRepositoryDependenciesByRepo(r.Context(), repoID)
+		fileCount, fileErr := h.queries.CountRepositoryDependencyFilesByRepo(r.Context(), repoID)
+		latestSync, syncErr := h.queries.ListLatestRepositoryDependencySync(r.Context(), repoID)
+		if depErr == nil && fileErr == nil && syncErr == nil && depCount > 0 && fileCount > 0 && len(latestSync) > 0 && latestSync[0].Status == "success" {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"queued":  false,
+				"repo_id": repoID,
+				"status":  "already_fetched",
+				"sync_id": latestSync[0].ID,
+			})
+			return
+		}
+	}
+
+	syncID, err := h.enqueueDependencySync(r.Context(), userID, repoID, "manual", force)
+	if err != nil {
 		http.Error(w, "failed to enqueue dependency fetch", http.StatusInternalServerError)
 		return
 	}
@@ -977,5 +1016,7 @@ func (h *Handler) fetchRepositoryDependencies(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"queued":  true,
 		"repo_id": repoID,
+		"sync_id": syncID,
+		"status":  "queued",
 	})
 }

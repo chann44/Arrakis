@@ -13,6 +13,7 @@ import (
 	"github.com/chann44/TGE/adapters"
 	internal "github.com/chann44/TGE/internals"
 	db "github.com/chann44/TGE/internals/db"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -32,29 +33,36 @@ type extractedDependency struct {
 	SourceFile string
 }
 
-func SyncRepositoryDependencies(ctx context.Context, queries *db.Queries, cfg *internal.Config, userID, repoID int64, trigger string) (retErr error) {
+func SyncRepositoryDependencies(ctx context.Context, queries *db.Queries, cfg *internal.Config, userID, repoID, syncID int64, trigger string, force bool) (retErr error) {
 	if trigger == "" {
 		trigger = "manual"
 	}
 
-	syncRow, err := queries.CreateRepositoryDependencySync(ctx, db.CreateRepositoryDependencySyncParams{
-		RepositoryID: repoID,
-		Status:       "running",
-		Trigger:      trigger,
-	})
-	if err != nil {
-		return fmt.Errorf("create dependency sync row: %w", err)
+	if syncID == 0 {
+		syncRow, err := queries.CreateRepositoryDependencySync(ctx, db.CreateRepositoryDependencySyncParams{
+			RepositoryID: repoID,
+			Status:       "running",
+			Trigger:      trigger,
+		})
+		if err != nil {
+			return fmt.Errorf("create dependency sync row: %w", err)
+		}
+		syncID = syncRow.ID
+	} else {
+		if err := queries.MarkRepositoryDependencySyncRunning(ctx, syncID); err != nil {
+			return fmt.Errorf("mark dependency sync running: %w", err)
+		}
 	}
 
 	defer func() {
 		if retErr != nil {
 			_ = queries.MarkRepositoryDependencySyncFailed(ctx, db.MarkRepositoryDependencySyncFailedParams{
-				ID:           syncRow.ID,
+				ID:           syncID,
 				ErrorMessage: truncateForDB(retErr.Error(), 8000),
 			})
 			return
 		}
-		_ = queries.MarkRepositoryDependencySyncSuccess(ctx, syncRow.ID)
+		_ = queries.MarkRepositoryDependencySyncSuccess(ctx, syncID)
 	}()
 
 	repo, err := findConnectedRepository(ctx, queries, userID, repoID)
@@ -129,6 +137,7 @@ func SyncRepositoryDependencies(ctx context.Context, queries *db.Queries, cfg *i
 	}
 
 	resolver := newMetadataResolver(ctx)
+	graphState := &graphPersistState{visitedEdges: make(map[string]struct{})}
 	for _, dep := range deps {
 		if strings.TrimSpace(dep.Name) == "" {
 			continue
@@ -144,28 +153,45 @@ func SyncRepositoryDependencies(ctx context.Context, queries *db.Queries, cfg *i
 			return fmt.Errorf("upsert package %s: %w", dep.Name, err)
 		}
 
-		meta := resolver.Resolve(dep)
-		resolvedVersion := strings.TrimSpace(meta.Version)
-		if resolvedVersion == "" {
-			resolvedVersion = sanitizeVersion(dep.Version)
-		}
-		if resolvedVersion == "" {
-			resolvedVersion = "unknown"
+		resolvedVersion := sanitizeVersion(dep.Version)
+		meta := resolvedMetadata{}
+		var resolvedVersionRow db.DependencyPackageVersion
+		usedExisting := false
+
+		if !force && resolvedVersion != "" {
+			existingVersion, found, findErr := findDependencyPackageVersion(ctx, queries, dep.Manager, dep.Registry, dep.Name, resolvedVersion)
+			if findErr != nil {
+				return findErr
+			}
+			if found {
+				resolvedVersionRow = existingVersion
+				usedExisting = true
+			}
 		}
 
-		resolvedVersionRow, err := queries.UpsertDependencyPackageVersion(ctx, db.UpsertDependencyPackageVersionParams{
-			PackageID:     pkg.ID,
-			Version:       resolvedVersion,
-			Creator:       meta.Creator,
-			Description:   meta.Description,
-			License:       meta.License,
-			Homepage:      meta.Homepage,
-			RepositoryUrl: meta.RepositoryURL,
-			RegistryUrl:   meta.RegistryURL,
-			ReleasedAt:    parseTimestamptz(meta.LastUpdated),
-		})
-		if err != nil {
-			return fmt.Errorf("upsert package version %s@%s: %w", dep.Name, resolvedVersion, err)
+		if !usedExisting {
+			meta = resolver.Resolve(dep)
+			if resolvedVersion == "" {
+				resolvedVersion = sanitizeVersion(meta.Version)
+			}
+			if resolvedVersion == "" {
+				resolvedVersion = "unknown"
+			}
+
+			resolvedVersionRow, err = queries.UpsertDependencyPackageVersion(ctx, db.UpsertDependencyPackageVersionParams{
+				PackageID:     pkg.ID,
+				Version:       resolvedVersion,
+				Creator:       meta.Creator,
+				Description:   meta.Description,
+				License:       meta.License,
+				Homepage:      meta.Homepage,
+				RepositoryUrl: meta.RepositoryURL,
+				RegistryUrl:   meta.RegistryURL,
+				ReleasedAt:    parseTimestamptz(meta.LastUpdated),
+			})
+			if err != nil {
+				return fmt.Errorf("upsert package version %s@%s: %w", dep.Name, resolvedVersion, err)
+			}
 		}
 
 		if err := queries.UpsertRepositoryDependency(ctx, db.UpsertRepositoryDependencyParams{
@@ -182,49 +208,8 @@ func SyncRepositoryDependencies(ctx context.Context, queries *db.Queries, cfg *i
 			return fmt.Errorf("upsert repository dependency %s: %w", dep.Name, err)
 		}
 
-		for _, child := range meta.Dependencies {
-			if strings.TrimSpace(child.Name) == "" {
-				continue
-			}
-
-			childPkg, err := queries.UpsertDependencyPackage(ctx, db.UpsertDependencyPackageParams{
-				Manager:        child.Manager,
-				Registry:       child.Registry,
-				NormalizedName: normalizeDependencyName(child.Manager, child.Name),
-				DisplayName:    child.Name,
-			})
-			if err != nil {
-				return fmt.Errorf("upsert child package %s: %w", child.Name, err)
-			}
-
-			childVersion := sanitizeVersion(child.VersionSpec)
-			if childVersion == "" {
-				childVersion = "unknown"
-			}
-
-			childVersionRow, err := queries.UpsertDependencyPackageVersion(ctx, db.UpsertDependencyPackageVersionParams{
-				PackageID:     childPkg.ID,
-				Version:       childVersion,
-				Creator:       "",
-				Description:   "",
-				License:       "",
-				Homepage:      "",
-				RepositoryUrl: "",
-				RegistryUrl:   "",
-				ReleasedAt:    pgtype.Timestamptz{},
-			})
-			if err != nil {
-				return fmt.Errorf("upsert child package version %s@%s: %w", child.Name, childVersion, err)
-			}
-
-			if err := queries.UpsertDependencyVersionDependency(ctx, db.UpsertDependencyVersionDependencyParams{
-				FromVersionID:  resolvedVersionRow.ID,
-				ToVersionID:    childVersionRow.ID,
-				DependencyType: normalizeScope(child.Scope),
-				VersionSpec:    child.VersionSpec,
-			}); err != nil {
-				return fmt.Errorf("upsert dependency edge %s -> %s: %w", dep.Name, child.Name, err)
-			}
+		if err := persistTransitiveDependencies(ctx, queries, resolver, graphState, resolvedVersionRow.ID, dep.Manager, meta.Dependencies, 1, force); err != nil {
+			return err
 		}
 	}
 
@@ -448,6 +433,16 @@ type metadataResolver struct {
 	cache map[string]resolvedMetadata
 }
 
+type graphPersistState struct {
+	visitedEdges map[string]struct{}
+	nodeCount    int
+}
+
+const (
+	maxPersistGraphDepth = 5
+	maxPersistGraphNodes = 1500
+)
+
 func newMetadataResolver(ctx context.Context) *metadataResolver {
 	return &metadataResolver{ctx: ctx, cache: make(map[string]resolvedMetadata)}
 }
@@ -510,6 +505,157 @@ func (r *metadataResolver) Resolve(dep extractedDependency) resolvedMetadata {
 	r.cache[key] = meta
 	r.mu.Unlock()
 	return meta
+}
+
+func persistTransitiveDependencies(
+	ctx context.Context,
+	queries *db.Queries,
+	resolver *metadataResolver,
+	state *graphPersistState,
+	fromVersionID int64,
+	defaultManager string,
+	children []adapters.PackageDependency,
+	depth int,
+	force bool,
+) error {
+	if depth > maxPersistGraphDepth || len(children) == 0 {
+		return nil
+	}
+	if !force {
+		edgeCount, err := queries.CountDependencyEdgesByFromVersion(ctx, fromVersionID)
+		if err == nil && edgeCount > 0 {
+			return nil
+		}
+	}
+
+	for _, child := range children {
+		if state.nodeCount >= maxPersistGraphNodes {
+			return nil
+		}
+		childName := strings.TrimSpace(child.Name)
+		if childName == "" {
+			continue
+		}
+
+		manager := strings.TrimSpace(child.Manager)
+		if manager == "" {
+			manager = defaultManager
+		}
+		registry := strings.TrimSpace(child.Registry)
+		if registry == "" {
+			registry = registryForManager(manager)
+		}
+
+		seed := extractedDependency{
+			Name:     childName,
+			Version:  strings.TrimSpace(child.VersionSpec),
+			Manager:  manager,
+			Registry: registry,
+			Scope:    normalizeScope(child.Scope),
+		}
+		childMeta := resolver.Resolve(seed)
+
+		childPackage, err := queries.UpsertDependencyPackage(ctx, db.UpsertDependencyPackageParams{
+			Manager:        manager,
+			Registry:       registry,
+			NormalizedName: normalizeDependencyName(manager, childName),
+			DisplayName:    childName,
+		})
+		if err != nil {
+			return fmt.Errorf("upsert transitive package %s: %w", childName, err)
+		}
+
+		concreteVersion := resolveConcreteVersion(child.VersionSpec, childMeta.Version)
+		childVersionRow, err := queries.UpsertDependencyPackageVersion(ctx, db.UpsertDependencyPackageVersionParams{
+			PackageID:     childPackage.ID,
+			Version:       concreteVersion,
+			Creator:       strings.TrimSpace(childMeta.Creator),
+			Description:   strings.TrimSpace(childMeta.Description),
+			License:       strings.TrimSpace(childMeta.License),
+			Homepage:      strings.TrimSpace(childMeta.Homepage),
+			RepositoryUrl: strings.TrimSpace(childMeta.RepositoryURL),
+			RegistryUrl:   strings.TrimSpace(childMeta.RegistryURL),
+			ReleasedAt:    parseTimestamptz(childMeta.LastUpdated),
+		})
+		if err != nil {
+			return fmt.Errorf("upsert transitive package version %s@%s: %w", childName, concreteVersion, err)
+		}
+
+		edgeKey := fmt.Sprintf("%d:%d:%s", fromVersionID, childVersionRow.ID, normalizeScope(child.Scope))
+		if _, exists := state.visitedEdges[edgeKey]; exists {
+			continue
+		}
+		state.visitedEdges[edgeKey] = struct{}{}
+
+		if err := queries.UpsertDependencyVersionDependency(ctx, db.UpsertDependencyVersionDependencyParams{
+			FromVersionID:  fromVersionID,
+			ToVersionID:    childVersionRow.ID,
+			DependencyType: normalizeScope(child.Scope),
+			VersionSpec:    strings.TrimSpace(child.VersionSpec),
+		}); err != nil {
+			return fmt.Errorf("upsert transitive edge %d -> %d: %w", fromVersionID, childVersionRow.ID, err)
+		}
+
+		state.nodeCount++
+		if err := persistTransitiveDependencies(
+			ctx,
+			queries,
+			resolver,
+			state,
+			childVersionRow.ID,
+			manager,
+			childMeta.Dependencies,
+			depth+1,
+			force,
+		); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func findDependencyPackageVersion(
+	ctx context.Context,
+	queries *db.Queries,
+	manager, registry, name, version string,
+) (db.DependencyPackageVersion, bool, error) {
+	pkg, err := queries.GetDependencyPackageByKey(ctx, db.GetDependencyPackageByKeyParams{
+		Manager:        manager,
+		Registry:       registry,
+		NormalizedName: normalizeDependencyName(manager, name),
+	})
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return db.DependencyPackageVersion{}, false, nil
+		}
+		return db.DependencyPackageVersion{}, false, fmt.Errorf("query package cache %s: %w", name, err)
+	}
+
+	versionRow, err := queries.GetDependencyPackageVersionByPackageAndVersion(ctx, db.GetDependencyPackageVersionByPackageAndVersionParams{
+		PackageID: pkg.ID,
+		Version:   version,
+	})
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return db.DependencyPackageVersion{}, false, nil
+		}
+		return db.DependencyPackageVersion{}, false, fmt.Errorf("query package version cache %s@%s: %w", name, version, err)
+	}
+
+	return versionRow, true, nil
+}
+
+func resolveConcreteVersion(versionSpec, fallbackLatest string) string {
+	resolved := sanitizeVersion(versionSpec)
+	if resolved != "" {
+		return resolved
+	}
+	resolved = sanitizeVersion(fallbackLatest)
+	if resolved != "" {
+		return resolved
+	}
+	return "unknown"
 }
 
 func parseTimestamptz(raw string) pgtype.Timestamptz {

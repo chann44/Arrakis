@@ -35,20 +35,21 @@ type repositoryDependency struct {
 }
 
 type dependencyGraphNode struct {
-	Name          string `json:"name"`
-	VersionSpec   string `json:"version_spec"`
-	LatestVersion string `json:"latest_version"`
-	Manager       string `json:"manager"`
-	Registry      string `json:"registry"`
-	Parent        string `json:"parent,omitempty"`
-	Depth         int    `json:"depth"`
-	Creator       string `json:"creator"`
-	Description   string `json:"description"`
-	License       string `json:"license"`
-	Homepage      string `json:"homepage"`
-	RepositoryURL string `json:"repository_url"`
-	RegistryURL   string `json:"registry_url"`
-	LastUpdated   string `json:"last_updated"`
+	Name           string `json:"name"`
+	VersionSpec    string `json:"version_spec"`
+	DependencyType string `json:"dependency_type,omitempty"`
+	LatestVersion  string `json:"latest_version"`
+	Manager        string `json:"manager"`
+	Registry       string `json:"registry"`
+	Parent         string `json:"parent,omitempty"`
+	Depth          int    `json:"depth"`
+	Creator        string `json:"creator"`
+	Description    string `json:"description"`
+	License        string `json:"license"`
+	Homepage       string `json:"homepage"`
+	RepositoryURL  string `json:"repository_url"`
+	RegistryURL    string `json:"registry_url"`
+	LastUpdated    string `json:"last_updated"`
 }
 
 type repositoryDependenciesResponse struct {
@@ -254,20 +255,21 @@ func buildDependencyGraphFromDB(ctx context.Context, queries *db.Queries, rootVe
 
 		for _, edge := range edges {
 			node := dependencyGraphNode{
-				Name:          strings.TrimSpace(edge.ChildName),
-				VersionSpec:   strings.TrimSpace(edge.VersionSpec),
-				LatestVersion: strings.TrimSpace(edge.ChildVersion),
-				Manager:       strings.TrimSpace(edge.ChildManager),
-				Registry:      strings.TrimSpace(edge.ChildRegistry),
-				Parent:        item.parent,
-				Depth:         item.depth,
-				Creator:       strings.TrimSpace(edge.ChildCreator),
-				Description:   strings.TrimSpace(edge.ChildDescription),
-				License:       strings.TrimSpace(edge.ChildLicense),
-				Homepage:      strings.TrimSpace(edge.ChildHomepage),
-				RepositoryURL: strings.TrimSpace(edge.ChildRepositoryUrl),
-				RegistryURL:   strings.TrimSpace(edge.ChildRegistryUrl),
-				LastUpdated:   timestamptzToString(edge.ChildReleasedAt),
+				Name:           strings.TrimSpace(edge.ChildName),
+				VersionSpec:    strings.TrimSpace(edge.VersionSpec),
+				DependencyType: strings.TrimSpace(edge.DependencyType),
+				LatestVersion:  strings.TrimSpace(edge.ChildVersion),
+				Manager:        strings.TrimSpace(edge.ChildManager),
+				Registry:       strings.TrimSpace(edge.ChildRegistry),
+				Parent:         item.parent,
+				Depth:          item.depth,
+				Creator:        strings.TrimSpace(edge.ChildCreator),
+				Description:    strings.TrimSpace(edge.ChildDescription),
+				License:        strings.TrimSpace(edge.ChildLicense),
+				Homepage:       strings.TrimSpace(edge.ChildHomepage),
+				RepositoryURL:  strings.TrimSpace(edge.ChildRepositoryUrl),
+				RegistryURL:    strings.TrimSpace(edge.ChildRegistryUrl),
+				LastUpdated:    timestamptzToString(edge.ChildReleasedAt),
 			}
 			nodes = append(nodes, node)
 			queue = append(queue, queueItem{versionID: edge.ToVersionID, parent: edge.ChildName, depth: item.depth + 1})

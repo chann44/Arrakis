@@ -10,6 +10,7 @@ import (
 const TypeDependencySync = "dependencies:sync"
 
 type DependencySyncPayload struct {
+	SyncID  int64  `json:"sync_id"`
 	UserID  int64  `json:"user_id"`
 	RepoID  int64  `json:"repo_id"`
 	Trigger string `json:"trigger"`

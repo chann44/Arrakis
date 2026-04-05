@@ -9,12 +9,18 @@ import (
 )
 
 type Querier interface {
+	CountDependencyEdgesByFromVersion(ctx context.Context, fromVersionID int64) (int64, error)
+	CountRepositoryDependenciesByRepo(ctx context.Context, repositoryID int64) (int64, error)
+	CountRepositoryDependencyFilesByRepo(ctx context.Context, repositoryID int64) (int64, error)
 	CreateRepositoryDependencySync(ctx context.Context, arg CreateRepositoryDependencySyncParams) (RepositoryDependencySync, error)
 	DeleteRepositoryDependenciesByRepo(ctx context.Context, repositoryID int64) error
 	DeleteRepositoryDependencyFilesByRepo(ctx context.Context, repositoryID int64) error
 	DeleteUserRepositories(ctx context.Context, userID int64) error
+	GetDependencyPackageByKey(ctx context.Context, arg GetDependencyPackageByKeyParams) (DependencyPackage, error)
+	GetDependencyPackageVersionByPackageAndVersion(ctx context.Context, arg GetDependencyPackageVersionByPackageAndVersionParams) (DependencyPackageVersion, error)
 	GetUserByID(ctx context.Context, id int64) (User, error)
 	GetUserOAuthToken(ctx context.Context, arg GetUserOAuthTokenParams) (UserOauthToken, error)
+	ListActiveRepositoryDependencySync(ctx context.Context, repositoryID int64) ([]RepositoryDependencySync, error)
 	ListDependencyEdgesByFromVersion(ctx context.Context, fromVersionID int64) ([]ListDependencyEdgesByFromVersionRow, error)
 	ListLatestRepositoryDependencySync(ctx context.Context, repositoryID int64) ([]RepositoryDependencySync, error)
 	ListRepositoryDependenciesDetailed(ctx context.Context, repositoryID int64) ([]ListRepositoryDependenciesDetailedRow, error)
@@ -22,6 +28,7 @@ type Querier interface {
 	ListUserGitHubInstallations(ctx context.Context, userID int64) ([]UserGithubInstallation, error)
 	ListUserRepositories(ctx context.Context, userID int64) ([]Repository, error)
 	MarkRepositoryDependencySyncFailed(ctx context.Context, arg MarkRepositoryDependencySyncFailedParams) error
+	MarkRepositoryDependencySyncRunning(ctx context.Context, id int64) error
 	MarkRepositoryDependencySyncSuccess(ctx context.Context, id int64) error
 	UpsertDependencyPackage(ctx context.Context, arg UpsertDependencyPackageParams) (DependencyPackage, error)
 	UpsertDependencyPackageVersion(ctx context.Context, arg UpsertDependencyPackageVersionParams) (DependencyPackageVersion, error)

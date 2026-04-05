@@ -39,6 +39,21 @@ func (r *Redis) Del(ctx context.Context, key string) error {
 	return r.client.Del(ctx, key).Err()
 }
 
+func (r *Redis) SetNX(ctx context.Context, key, value string, ttl time.Duration) (bool, error) {
+	return r.client.SetNX(ctx, key, value, ttl).Result()
+}
+
+func (r *Redis) CompareAndDelete(ctx context.Context, key, expectedValue string) error {
+	const script = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+else
+  return 0
+end
+`
+	return r.client.Eval(ctx, script, []string{key}, expectedValue).Err()
+}
+
 func (r *Redis) Close() error {
 	if r == nil || r.client == nil {
 		return nil

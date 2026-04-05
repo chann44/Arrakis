@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/chann44/TGE/adapters"
 	internal "github.com/chann44/TGE/internals"
@@ -30,6 +31,15 @@ func main() {
 
 	queries := db.New(postgresPool)
 	redisAddr := fmt.Sprintf("%s:%s", cfg.RedisHost, cfg.RedisPort)
+	redisClient, err := adapters.NewRedis(redisAddr, "", 0)
+	if err != nil {
+		log.Fatalf("worker: failed to initialize redis: %v", err)
+	}
+	defer func() {
+		if closeErr := redisClient.Close(); closeErr != nil {
+			log.Printf("worker: failed to close redis client: %v", closeErr)
+		}
+	}()
 
 	srv := asynq.NewServer(
 		asynq.RedisClientOpt{Addr: redisAddr},
@@ -47,9 +57,34 @@ func main() {
 		if err != nil {
 			return fmt.Errorf("parse payload: %w", asynq.SkipRetry)
 		}
-		if err := services.SyncRepositoryDependencies(ctx, queries, cfg, payload.UserID, payload.RepoID, payload.Trigger); err != nil {
+
+		lockKey := fmt.Sprintf("deps:repo-lock:%d", payload.RepoID)
+		lockValue := fmt.Sprintf("sync:%d:%d", payload.SyncID, time.Now().UnixNano())
+		acquired, err := redisClient.SetNX(ctx, lockKey, lockValue, 45*time.Minute)
+		if err != nil {
+			return fmt.Errorf("acquire repo lock: %w", err)
+		}
+		if !acquired {
+			if payload.SyncID != 0 {
+				_ = queries.MarkRepositoryDependencySyncFailed(ctx, db.MarkRepositoryDependencySyncFailedParams{
+					ID:           payload.SyncID,
+					ErrorMessage: "sync already running for repository",
+				})
+			}
+			log.Printf("worker skip dependency sync repo_id=%d sync_id=%d reason=locked", payload.RepoID, payload.SyncID)
+			return nil
+		}
+		defer func() {
+			_ = redisClient.CompareAndDelete(ctx, lockKey, lockValue)
+		}()
+
+		started := time.Now()
+		log.Printf("worker start dependency sync repo_id=%d sync_id=%d trigger=%s", payload.RepoID, payload.SyncID, payload.Trigger)
+		if err := services.SyncRepositoryDependencies(ctx, queries, cfg, payload.UserID, payload.RepoID, payload.SyncID, payload.Trigger, payload.Force); err != nil {
+			log.Printf("worker dependency sync failed repo_id=%d sync_id=%d err=%v", payload.RepoID, payload.SyncID, err)
 			return err
 		}
+		log.Printf("worker dependency sync complete repo_id=%d sync_id=%d duration=%s", payload.RepoID, payload.SyncID, time.Since(started).String())
 		return nil
 	})
 

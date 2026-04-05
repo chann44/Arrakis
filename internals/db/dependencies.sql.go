@@ -11,6 +11,45 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countDependencyEdgesByFromVersion = `-- name: CountDependencyEdgesByFromVersion :one
+SELECT COUNT(*)
+FROM dependency_version_dependencies
+WHERE from_version_id = $1
+`
+
+func (q *Queries) CountDependencyEdgesByFromVersion(ctx context.Context, fromVersionID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countDependencyEdgesByFromVersion, fromVersionID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countRepositoryDependenciesByRepo = `-- name: CountRepositoryDependenciesByRepo :one
+SELECT COUNT(*)
+FROM repository_dependencies
+WHERE repository_id = $1
+`
+
+func (q *Queries) CountRepositoryDependenciesByRepo(ctx context.Context, repositoryID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countRepositoryDependenciesByRepo, repositoryID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countRepositoryDependencyFilesByRepo = `-- name: CountRepositoryDependencyFilesByRepo :one
+SELECT COUNT(*)
+FROM repository_dependency_files
+WHERE repository_id = $1
+`
+
+func (q *Queries) CountRepositoryDependencyFilesByRepo(ctx context.Context, repositoryID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countRepositoryDependencyFilesByRepo, repositoryID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createRepositoryDependencySync = `-- name: CreateRepositoryDependencySync :one
 INSERT INTO repository_dependency_syncs (
     repository_id,
@@ -71,6 +110,106 @@ WHERE repository_id = $1
 func (q *Queries) DeleteRepositoryDependencyFilesByRepo(ctx context.Context, repositoryID int64) error {
 	_, err := q.db.Exec(ctx, deleteRepositoryDependencyFilesByRepo, repositoryID)
 	return err
+}
+
+const getDependencyPackageByKey = `-- name: GetDependencyPackageByKey :one
+SELECT id, manager, registry, normalized_name, display_name, created_at, updated_at
+FROM dependency_packages
+WHERE manager = $1
+  AND registry = $2
+  AND normalized_name = $3
+`
+
+type GetDependencyPackageByKeyParams struct {
+	Manager        string `json:"manager"`
+	Registry       string `json:"registry"`
+	NormalizedName string `json:"normalized_name"`
+}
+
+func (q *Queries) GetDependencyPackageByKey(ctx context.Context, arg GetDependencyPackageByKeyParams) (DependencyPackage, error) {
+	row := q.db.QueryRow(ctx, getDependencyPackageByKey, arg.Manager, arg.Registry, arg.NormalizedName)
+	var i DependencyPackage
+	err := row.Scan(
+		&i.ID,
+		&i.Manager,
+		&i.Registry,
+		&i.NormalizedName,
+		&i.DisplayName,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getDependencyPackageVersionByPackageAndVersion = `-- name: GetDependencyPackageVersionByPackageAndVersion :one
+SELECT id, package_id, version, creator, description, license, homepage, repository_url, registry_url, released_at, created_at, updated_at
+FROM dependency_package_versions
+WHERE package_id = $1
+  AND version = $2
+`
+
+type GetDependencyPackageVersionByPackageAndVersionParams struct {
+	PackageID int64  `json:"package_id"`
+	Version   string `json:"version"`
+}
+
+func (q *Queries) GetDependencyPackageVersionByPackageAndVersion(ctx context.Context, arg GetDependencyPackageVersionByPackageAndVersionParams) (DependencyPackageVersion, error) {
+	row := q.db.QueryRow(ctx, getDependencyPackageVersionByPackageAndVersion, arg.PackageID, arg.Version)
+	var i DependencyPackageVersion
+	err := row.Scan(
+		&i.ID,
+		&i.PackageID,
+		&i.Version,
+		&i.Creator,
+		&i.Description,
+		&i.License,
+		&i.Homepage,
+		&i.RepositoryUrl,
+		&i.RegistryUrl,
+		&i.ReleasedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const listActiveRepositoryDependencySync = `-- name: ListActiveRepositoryDependencySync :many
+SELECT id, repository_id, status, trigger, error_message, started_at, finished_at, created_at, updated_at
+FROM repository_dependency_syncs
+WHERE repository_id = $1
+  AND status IN ('queued', 'running')
+ORDER BY started_at DESC
+LIMIT 1
+`
+
+func (q *Queries) ListActiveRepositoryDependencySync(ctx context.Context, repositoryID int64) ([]RepositoryDependencySync, error) {
+	rows, err := q.db.Query(ctx, listActiveRepositoryDependencySync, repositoryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RepositoryDependencySync
+	for rows.Next() {
+		var i RepositoryDependencySync
+		if err := rows.Scan(
+			&i.ID,
+			&i.RepositoryID,
+			&i.Status,
+			&i.Trigger,
+			&i.ErrorMessage,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listDependencyEdgesByFromVersion = `-- name: ListDependencyEdgesByFromVersion :many
@@ -337,6 +476,21 @@ type MarkRepositoryDependencySyncFailedParams struct {
 
 func (q *Queries) MarkRepositoryDependencySyncFailed(ctx context.Context, arg MarkRepositoryDependencySyncFailedParams) error {
 	_, err := q.db.Exec(ctx, markRepositoryDependencySyncFailed, arg.ID, arg.ErrorMessage)
+	return err
+}
+
+const markRepositoryDependencySyncRunning = `-- name: MarkRepositoryDependencySyncRunning :exec
+UPDATE repository_dependency_syncs
+SET status = 'running',
+    error_message = '',
+    started_at = NOW(),
+    finished_at = NULL,
+    updated_at = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) MarkRepositoryDependencySyncRunning(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markRepositoryDependencySyncRunning, id)
 	return err
 }
 

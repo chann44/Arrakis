@@ -54,6 +54,7 @@ type RepositoryDependency = {
 		parent?: string;
 		depth: number;
 		version_spec: string;
+		dependency_type?: string;
 		latest_version: string;
 		manager: string;
 		registry: string;
@@ -176,6 +177,15 @@ export const actions: Actions = {
 			return fail(response.status, { message: 'Failed to enqueue dependency fetch' });
 		}
 
-		return { queued: true };
+		const payload = (await response.json()) as { queued?: boolean; status?: string; sync_id?: number };
+		return {
+			queued: payload.queued === true,
+			syncStatus: payload.status ?? 'queued',
+			syncId: payload.sync_id ?? null,
+			message:
+				payload.queued === true
+					? null
+					: 'Dependencies already fetched. Skipping re-fetch.'
+		};
 	}
 };
