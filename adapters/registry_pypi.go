@@ -100,6 +100,7 @@ func GetPyPIPackageMetadata(ctx context.Context, packageName string) (*PyPIPacka
 			VersionSpec: version,
 			Manager:     "pip",
 			Registry:    "pypi",
+			Scope:       "default",
 		})
 	}
 

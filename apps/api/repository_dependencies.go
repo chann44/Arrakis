@@ -1,16 +1,15 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"net/http"
-	"path"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 
-	"github.com/chann44/TGE/adapters"
+	db "github.com/chann44/TGE/internals/db"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type repositoryDependency struct {
@@ -60,6 +59,9 @@ type repositoryDependenciesResponse struct {
 	Total        int                    `json:"total"`
 	TotalPages   int                    `json:"total_pages"`
 	Dependencies []repositoryDependency `json:"dependencies"`
+	SyncStatus   string                 `json:"sync_status,omitempty"`
+	SyncError    string                 `json:"sync_error,omitempty"`
+	LastSyncedAt string                 `json:"last_synced_at,omitempty"`
 }
 
 func (h *Handler) githubRepositoryDependencies(w http.ResponseWriter, r *http.Request) {
@@ -76,124 +78,96 @@ func (h *Handler) githubRepositoryDependencies(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	connectedRepos, err := h.queries.ListUserRepositories(r.Context(), userID)
-	if err != nil {
-		http.Error(w, "failed to fetch connected repositories", http.StatusInternalServerError)
-		return
-	}
-
-	connected := false
-	for _, repo := range connectedRepos {
-		if repo.GithubRepoID == repoID {
-			connected = true
-			break
-		}
-	}
-	if !connected {
+	repo, ok := connectedRepositoryForUser(r.Context(), h.queries, userID, repoID)
+	if !ok {
 		http.Error(w, "repository is not connected", http.StatusNotFound)
 		return
 	}
 
-	installationToken, repository, err := h.installationTokenForRepo(r.Context(), userID, repoID)
+	rows, err := h.queries.ListRepositoryDependenciesDetailed(r.Context(), repoID)
 	if err != nil {
-		http.Error(w, "github app installation access not found for repository", http.StatusForbidden)
+		http.Error(w, "failed to fetch repository dependencies", http.StatusInternalServerError)
 		return
 	}
 
-	owner, repoName, ok := strings.Cut(repository.FullName, "/")
-	if !ok || strings.TrimSpace(owner) == "" || strings.TrimSpace(repoName) == "" {
-		http.Error(w, "invalid repository full name", http.StatusBadGateway)
-		return
-	}
-
-	tree, err := adapters.ListRepositoryTree(r.Context(), installationToken, owner, repoName, repository.DefaultBranch)
-	if err != nil {
-		http.Error(w, "failed to fetch repository tree", http.StatusBadGateway)
-		return
-	}
-
-	manifestFiles := make([]dependencyFileResponse, 0)
-	for _, entry := range tree {
-		if entry.Type != "blob" {
-			continue
-		}
-		fileName := path.Base(entry.Path)
-		manager := dependencyManagerForFile(fileName)
-		if manager == "" {
-			continue
-		}
-		manifestFiles = append(manifestFiles, dependencyFileResponse{
-			Path:     entry.Path,
-			File:     fileName,
-			Manager:  manager,
-			Registry: registryForManager(manager),
-		})
-	}
-
-	dependencies := make([]repositoryDependency, 0)
-	for _, manifest := range manifestFiles {
-		content, err := adapters.GetRepositoryFileContent(r.Context(), installationToken, owner, repoName, manifest.Path, repository.DefaultBranch)
-		if err != nil {
-			continue
+	deps := make([]repositoryDependency, 0, len(rows))
+	for _, row := range rows {
+		dep := repositoryDependency{
+			Name:          row.DisplayName,
+			VersionSpec:   strings.TrimSpace(row.VersionSpec),
+			LatestVersion: textToString(row.ResolvedVersion),
+			Manager:       strings.TrimSpace(row.Manager),
+			Registry:      strings.TrimSpace(row.Registry),
+			Scope:         strings.TrimSpace(row.Scope),
+			SourceFile:    strings.TrimSpace(row.SourceFile),
+			Creator:       textToString(row.Creator),
+			Description:   textToString(row.Description),
+			License:       textToString(row.License),
+			Homepage:      textToString(row.Homepage),
+			RepositoryURL: textToString(row.RepositoryUrl),
+			RegistryURL:   textToString(row.RegistryUrl),
+			LastUpdated:   timestamptzToString(row.ReleasedAt),
 		}
 
-		parsed := parseDependenciesFromManifest(manifest, content)
-		dependencies = append(dependencies, parsed...)
+		if row.ResolvedVersionID.Valid {
+			dep.DependencyGraph = buildDependencyGraphFromDB(r.Context(), h.queries, row.ResolvedVersionID.Int64, dep.Name)
+		}
+
+		deps = append(deps, dep)
 	}
 
 	includePeer := strings.TrimSpace(r.URL.Query().Get("include_peer"))
 	if strings.EqualFold(includePeer, "false") || includePeer == "0" {
-		filtered := make([]repositoryDependency, 0, len(dependencies))
-		for _, dep := range dependencies {
+		filtered := make([]repositoryDependency, 0, len(deps))
+		for _, dep := range deps {
 			if dep.Scope == "peer" {
 				continue
 			}
 			filtered = append(filtered, dep)
 		}
-		dependencies = filtered
+		deps = filtered
 	}
 
 	managerFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("manager")))
 	if managerFilter != "" && managerFilter != "all" {
-		filtered := make([]repositoryDependency, 0, len(dependencies))
-		for _, dep := range dependencies {
+		filtered := make([]repositoryDependency, 0, len(deps))
+		for _, dep := range deps {
 			if strings.ToLower(dep.Manager) == managerFilter {
 				filtered = append(filtered, dep)
 			}
 		}
-		dependencies = filtered
+		deps = filtered
 	}
 
 	scopeFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("scope")))
 	if scopeFilter != "" && scopeFilter != "all" {
-		filtered := make([]repositoryDependency, 0, len(dependencies))
-		for _, dep := range dependencies {
+		filtered := make([]repositoryDependency, 0, len(deps))
+		for _, dep := range deps {
 			if strings.ToLower(dep.Scope) == scopeFilter {
 				filtered = append(filtered, dep)
 			}
 		}
-		dependencies = filtered
+		deps = filtered
 	}
 
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 	if q != "" {
-		filtered := make([]repositoryDependency, 0, len(dependencies))
-		for _, dep := range dependencies {
+		filtered := make([]repositoryDependency, 0, len(deps))
+		for _, dep := range deps {
 			if strings.Contains(strings.ToLower(dep.Name), q) || strings.Contains(strings.ToLower(dep.SourceFile), q) {
 				filtered = append(filtered, dep)
 			}
 		}
-		dependencies = filtered
+		deps = filtered
 	}
 
-	enrichDependenciesWithMetadata(r, dependencies)
-	dependencies = groupDependencies(dependencies)
+	deps = groupDependencies(deps)
 
-	sort.Slice(dependencies, func(i, j int) bool {
-		if dependencies[i].Manager != dependencies[j].Manager {
-			return dependencies[i].Manager < dependencies[j].Manager
+	sort.Slice(deps, func(i, j int) bool {
+		if deps[i].Manager != deps[j].Manager {
+			return deps[i].Manager < deps[j].Manager
 		}
-		return dependencies[i].Name < dependencies[j].Name
+		return deps[i].Name < deps[j].Name
 	})
 
 	page := queryInt(r.URL.Query().Get("page"), 1)
@@ -202,7 +176,7 @@ func (h *Handler) githubRepositoryDependencies(w http.ResponseWriter, r *http.Re
 		pageSize = 100
 	}
 
-	total := len(dependencies)
+	total := len(deps)
 	totalPages := 0
 	if total > 0 {
 		totalPages = (total + pageSize - 1) / pageSize
@@ -222,147 +196,98 @@ func (h *Handler) githubRepositoryDependencies(w http.ResponseWriter, r *http.Re
 		end = total
 	}
 
-	writeJSON(w, http.StatusOK, repositoryDependenciesResponse{
+	response := repositoryDependenciesResponse{
 		RepositoryID: repoID,
-		FullName:     repository.FullName,
+		FullName:     repo.FullName,
 		Page:         page,
 		PageSize:     pageSize,
 		Total:        total,
 		TotalPages:   totalPages,
-		Dependencies: dependencies[start:end],
+		Dependencies: deps[start:end],
+	}
+
+	syncRows, syncErr := h.queries.ListLatestRepositoryDependencySync(r.Context(), repoID)
+	if syncErr == nil && len(syncRows) > 0 {
+		latest := syncRows[0]
+		response.SyncStatus = latest.Status
+		response.SyncError = strings.TrimSpace(latest.ErrorMessage)
+		if latest.FinishedAt.Valid {
+			response.LastSyncedAt = latest.FinishedAt.Time.Format(timeLayoutISO)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}
+
+func buildDependencyGraphFromDB(ctx context.Context, queries *db.Queries, rootVersionID int64, rootName string) []dependencyGraphNode {
+	const (
+		maxGraphNodes = 400
+		maxGraphDepth = 6
+	)
+
+	type queueItem struct {
+		versionID int64
+		parent    string
+		depth     int
+	}
+
+	queue := []queueItem{{versionID: rootVersionID, parent: rootName, depth: 1}}
+	visited := make(map[int64]struct{})
+	nodes := make([]dependencyGraphNode, 0)
+
+	for len(queue) > 0 && len(nodes) < maxGraphNodes {
+		item := queue[0]
+		queue = queue[1:]
+
+		if item.depth > maxGraphDepth {
+			continue
+		}
+		if _, ok := visited[item.versionID]; ok {
+			continue
+		}
+		visited[item.versionID] = struct{}{}
+
+		edges, err := queries.ListDependencyEdgesByFromVersion(ctx, item.versionID)
+		if err != nil {
+			continue
+		}
+
+		for _, edge := range edges {
+			node := dependencyGraphNode{
+				Name:          strings.TrimSpace(edge.ChildName),
+				VersionSpec:   strings.TrimSpace(edge.VersionSpec),
+				LatestVersion: strings.TrimSpace(edge.ChildVersion),
+				Manager:       strings.TrimSpace(edge.ChildManager),
+				Registry:      strings.TrimSpace(edge.ChildRegistry),
+				Parent:        item.parent,
+				Depth:         item.depth,
+				Creator:       strings.TrimSpace(edge.ChildCreator),
+				Description:   strings.TrimSpace(edge.ChildDescription),
+				License:       strings.TrimSpace(edge.ChildLicense),
+				Homepage:      strings.TrimSpace(edge.ChildHomepage),
+				RepositoryURL: strings.TrimSpace(edge.ChildRepositoryUrl),
+				RegistryURL:   strings.TrimSpace(edge.ChildRegistryUrl),
+				LastUpdated:   timestamptzToString(edge.ChildReleasedAt),
+			}
+			nodes = append(nodes, node)
+			queue = append(queue, queueItem{versionID: edge.ToVersionID, parent: edge.ChildName, depth: item.depth + 1})
+			if len(nodes) >= maxGraphNodes {
+				break
+			}
+		}
+	}
+
+	sort.Slice(nodes, func(i, j int) bool {
+		if nodes[i].Depth != nodes[j].Depth {
+			return nodes[i].Depth < nodes[j].Depth
+		}
+		if nodes[i].Manager != nodes[j].Manager {
+			return nodes[i].Manager < nodes[j].Manager
+		}
+		return nodes[i].Name < nodes[j].Name
 	})
-}
 
-func parseDependenciesFromManifest(manifest dependencyFileResponse, content string) []repositoryDependency {
-	switch manifest.Manager {
-	case "npm":
-		return parsePackageJSONDependencies(manifest.Path, content)
-	case "pip":
-		return parseRequirementsDependencies(manifest.Path, content)
-	case "go":
-		return parseGoModDependencies(manifest.Path, content)
-	default:
-		return nil
-	}
-}
-
-func parsePackageJSONDependencies(sourcePath, content string) []repositoryDependency {
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(content), &payload); err != nil {
-		return nil
-	}
-
-	deps := make([]repositoryDependency, 0)
-	appendFrom := func(key, scope string) {
-		raw, ok := payload[key]
-		if !ok {
-			return
-		}
-		m, ok := raw.(map[string]any)
-		if !ok {
-			return
-		}
-		for name, versionRaw := range m {
-			version, _ := versionRaw.(string)
-			deps = append(deps, repositoryDependency{
-				Name:        strings.TrimSpace(name),
-				VersionSpec: strings.TrimSpace(version),
-				Manager:     "npm",
-				Registry:    "npm",
-				Scope:       scope,
-				SourceFile:  sourcePath,
-			})
-		}
-	}
-
-	appendFrom("dependencies", "prod")
-	appendFrom("devDependencies", "dev")
-	appendFrom("peerDependencies", "peer")
-	return deps
-}
-
-func parseRequirementsDependencies(sourcePath, content string) []repositoryDependency {
-	deps := make([]repositoryDependency, 0)
-	lines := strings.Split(content, "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "-") {
-			continue
-		}
-
-		name, version := splitDependencySpec(trimmed)
-		if name == "" {
-			continue
-		}
-
-		deps = append(deps, repositoryDependency{
-			Name:        name,
-			VersionSpec: version,
-			Manager:     "pip",
-			Registry:    "pypi",
-			Scope:       "default",
-			SourceFile:  sourcePath,
-		})
-	}
-	return deps
-}
-
-func parseGoModDependencies(sourcePath, content string) []repositoryDependency {
-	deps := make([]repositoryDependency, 0)
-	lines := strings.Split(content, "\n")
-	inRequireBlock := false
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "//") {
-			continue
-		}
-		if strings.HasPrefix(trimmed, "require (") {
-			inRequireBlock = true
-			continue
-		}
-		if inRequireBlock && trimmed == ")" {
-			inRequireBlock = false
-			continue
-		}
-
-		if strings.HasPrefix(trimmed, "require ") {
-			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "require "))
-		}
-
-		if inRequireBlock || strings.HasPrefix(line, "require ") || strings.HasPrefix(trimmed, "github.com") || strings.Contains(trimmed, ".") {
-			fields := strings.Fields(trimmed)
-			if len(fields) < 2 {
-				continue
-			}
-			module := fields[0]
-			version := fields[1]
-			if strings.HasPrefix(module, "(") || strings.HasPrefix(module, "module") {
-				continue
-			}
-			deps = append(deps, repositoryDependency{
-				Name:        module,
-				VersionSpec: version,
-				Manager:     "go",
-				Registry:    "github",
-				Scope:       "default",
-				SourceFile:  sourcePath,
-			})
-		}
-	}
-
-	return deps
-}
-
-func splitDependencySpec(line string) (string, string) {
-	operators := []string{"==", ">=", "<=", "~=", "!=", ">", "<", "="}
-	for _, op := range operators {
-		idx := strings.Index(line, op)
-		if idx > 0 {
-			return strings.TrimSpace(line[:idx]), strings.TrimSpace(line[idx:])
-		}
-	}
-	return strings.TrimSpace(line), ""
+	return nodes
 }
 
 func groupDependencies(deps []repositoryDependency) []repositoryDependency {
@@ -382,7 +307,6 @@ func groupDependencies(deps []repositoryDependency) []repositoryDependency {
 			clone.Scopes = nil
 			clone.UsedInFiles = nil
 			clone.UsageCount = 0
-			clone.DependencyGraph = nil
 			groupedByKey[key] = &clone
 			group = &clone
 			order = append(order, key)
@@ -402,7 +326,6 @@ func groupDependencies(deps []repositoryDependency) []repositoryDependency {
 		if group.SourceFile == "" && dep.SourceFile != "" {
 			group.SourceFile = dep.SourceFile
 		}
-
 		if group.LatestVersion == "" {
 			group.LatestVersion = dep.LatestVersion
 		}
@@ -453,219 +376,31 @@ func appendUnique(items []string, value string) []string {
 	return append(items, v)
 }
 
-func enrichDependenciesWithMetadata(r *http.Request, deps []repositoryDependency) {
-	if len(deps) == 0 {
-		return
-	}
+const timeLayoutISO = "2006-01-02T15:04:05Z07:00"
 
-	workerCount := 6
-	if len(deps) < workerCount {
-		workerCount = len(deps)
+func timestamptzToString(value pgtype.Timestamptz) string {
+	if !value.Valid {
+		return ""
 	}
-
-	ch := make(chan int)
-	var wg sync.WaitGroup
-	for i := 0; i < workerCount; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for idx := range ch {
-				dep := &deps[idx]
-				switch dep.Manager {
-				case "npm":
-					meta, err := adapters.GetNPMPackageMetadata(r.Context(), dep.Name)
-					if err == nil && meta != nil {
-						dep.LatestVersion = meta.LatestVersion
-						dep.Creator = meta.Creator
-						dep.Description = meta.Description
-						dep.License = meta.License
-						dep.Homepage = meta.Homepage
-						dep.RepositoryURL = meta.RepositoryURL
-						dep.RegistryURL = meta.RegistryURL
-						dep.LastUpdated = meta.LastUpdated
-						dep.DependencyGraph = buildFullDependencyGraph(r, adapters.PackageDependency{
-							Name:        dep.Name,
-							VersionSpec: dep.VersionSpec,
-							Manager:     dep.Manager,
-							Registry:    dep.Registry,
-						}, meta.Dependencies)
-					}
-				case "pip":
-					meta, err := adapters.GetPyPIPackageMetadata(r.Context(), dep.Name)
-					if err == nil && meta != nil {
-						dep.LatestVersion = meta.LatestVersion
-						dep.Creator = meta.Creator
-						dep.Description = meta.Description
-						dep.License = meta.License
-						dep.Homepage = meta.Homepage
-						dep.RepositoryURL = meta.RepositoryURL
-						dep.RegistryURL = meta.RegistryURL
-						dep.LastUpdated = meta.LastUpdated
-						dep.DependencyGraph = buildFullDependencyGraph(r, adapters.PackageDependency{
-							Name:        dep.Name,
-							VersionSpec: dep.VersionSpec,
-							Manager:     dep.Manager,
-							Registry:    dep.Registry,
-						}, meta.Dependencies)
-					}
-				case "go":
-					meta, err := adapters.GetGoPackageMetadata(r.Context(), dep.Name)
-					if err == nil && meta != nil {
-						dep.LatestVersion = meta.LatestVersion
-						dep.Creator = meta.Creator
-						dep.RegistryURL = meta.RegistryURL
-						dep.LastUpdated = meta.LastUpdated
-						dep.DependencyGraph = buildFullDependencyGraph(r, adapters.PackageDependency{
-							Name:        dep.Name,
-							VersionSpec: dep.VersionSpec,
-							Manager:     dep.Manager,
-							Registry:    dep.Registry,
-						}, meta.Dependencies)
-					}
-				}
-			}
-		}()
-	}
-
-	for idx := range deps {
-		ch <- idx
-	}
-	close(ch)
-	wg.Wait()
+	return value.Time.Format(timeLayoutISO)
 }
 
-type graphQueueItem struct {
-	Dep    adapters.PackageDependency
-	Parent string
-	Depth  int
+func textToString(value pgtype.Text) string {
+	if !value.Valid {
+		return ""
+	}
+	return strings.TrimSpace(value.String)
 }
 
-type graphMetadata struct {
-	Node     dependencyGraphNode
-	Children []adapters.PackageDependency
-}
-
-func buildFullDependencyGraph(r *http.Request, root adapters.PackageDependency, roots []adapters.PackageDependency) []dependencyGraphNode {
-	if len(roots) == 0 {
-		return nil
+func connectedRepositoryForUser(ctx context.Context, queries *db.Queries, userID, repoID int64) (db.Repository, bool) {
+	repos, err := queries.ListUserRepositories(ctx, userID)
+	if err != nil {
+		return db.Repository{}, false
 	}
-
-	const (
-		maxGraphNodes = 400
-		maxGraphDepth = 6
-	)
-
-	queue := make([]graphQueueItem, 0, len(roots))
-	for _, dep := range roots {
-		queue = append(queue, graphQueueItem{Dep: dep, Parent: root.Name, Depth: 1})
-	}
-
-	cache := make(map[string]graphMetadata)
-	visited := make(map[string]struct{})
-	graph := make([]dependencyGraphNode, 0)
-
-	for len(queue) > 0 && len(graph) < maxGraphNodes {
-		item := queue[0]
-		queue = queue[1:]
-
-		if item.Depth > maxGraphDepth || strings.TrimSpace(item.Dep.Name) == "" {
-			continue
-		}
-
-		key := strings.ToLower(item.Dep.Manager + "|" + item.Dep.Name)
-		if _, seen := visited[key]; seen {
-			continue
-		}
-		visited[key] = struct{}{}
-
-		metadata, ok := cache[key]
-		if !ok {
-			resolved := resolveGraphMetadata(r, item.Dep)
-			cache[key] = resolved
-			metadata = resolved
-		}
-
-		node := metadata.Node
-		node.Parent = item.Parent
-		node.Depth = item.Depth
-		if node.VersionSpec == "" {
-			node.VersionSpec = item.Dep.VersionSpec
-		}
-		if node.Manager == "" {
-			node.Manager = item.Dep.Manager
-		}
-		if node.Registry == "" {
-			node.Registry = item.Dep.Registry
-		}
-
-		graph = append(graph, node)
-
-		for _, child := range metadata.Children {
-			queue = append(queue, graphQueueItem{Dep: child, Parent: item.Dep.Name, Depth: item.Depth + 1})
+	for _, repo := range repos {
+		if repo.GithubRepoID == repoID {
+			return repo, true
 		}
 	}
-
-	sort.Slice(graph, func(i, j int) bool {
-		if graph[i].Depth != graph[j].Depth {
-			return graph[i].Depth < graph[j].Depth
-		}
-		if graph[i].Manager != graph[j].Manager {
-			return graph[i].Manager < graph[j].Manager
-		}
-		return graph[i].Name < graph[j].Name
-	})
-
-	return graph
-}
-
-func resolveGraphMetadata(r *http.Request, dep adapters.PackageDependency) graphMetadata {
-	node := dependencyGraphNode{
-		Name:        dep.Name,
-		VersionSpec: dep.VersionSpec,
-		Manager:     dep.Manager,
-		Registry:    dep.Registry,
-	}
-
-	switch dep.Manager {
-	case "npm":
-		meta, err := adapters.GetNPMPackageMetadata(r.Context(), dep.Name)
-		if err != nil || meta == nil {
-			return graphMetadata{Node: node}
-		}
-		node.LatestVersion = meta.LatestVersion
-		node.Creator = meta.Creator
-		node.Description = meta.Description
-		node.License = meta.License
-		node.Homepage = meta.Homepage
-		node.RepositoryURL = meta.RepositoryURL
-		node.RegistryURL = meta.RegistryURL
-		node.LastUpdated = meta.LastUpdated
-		return graphMetadata{Node: node, Children: meta.Dependencies}
-	case "pip":
-		meta, err := adapters.GetPyPIPackageMetadata(r.Context(), dep.Name)
-		if err != nil || meta == nil {
-			return graphMetadata{Node: node}
-		}
-		node.LatestVersion = meta.LatestVersion
-		node.Creator = meta.Creator
-		node.Description = meta.Description
-		node.License = meta.License
-		node.Homepage = meta.Homepage
-		node.RepositoryURL = meta.RepositoryURL
-		node.RegistryURL = meta.RegistryURL
-		node.LastUpdated = meta.LastUpdated
-		return graphMetadata{Node: node, Children: meta.Dependencies}
-	case "go":
-		meta, err := adapters.GetGoPackageMetadata(r.Context(), dep.Name)
-		if err != nil || meta == nil {
-			return graphMetadata{Node: node}
-		}
-		node.LatestVersion = meta.LatestVersion
-		node.Creator = meta.Creator
-		node.RegistryURL = meta.RegistryURL
-		node.LastUpdated = meta.LastUpdated
-		return graphMetadata{Node: node, Children: meta.Dependencies}
-	default:
-		return graphMetadata{Node: node}
-	}
+	return db.Repository{}, false
 }

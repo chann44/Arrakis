@@ -16,6 +16,7 @@ import (
 	db "github.com/chann44/TGE/internals/db"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/hibiken/asynq"
 )
 
 func main() {
@@ -44,7 +45,14 @@ func main() {
 		}
 	}()
 
-	handler := NewHandler(cfg, redisClient, queries)
+	asynqClient := asynq.NewClient(asynq.RedisClientOpt{Addr: redisAddr})
+	defer func() {
+		if err := asynqClient.Close(); err != nil {
+			log.Printf("api: failed to close asynq client: %v", err)
+		}
+	}()
+
+	handler := NewHandler(cfg, redisClient, queries, asynqClient)
 
 	r := chi.NewRouter()
 	r.Use(

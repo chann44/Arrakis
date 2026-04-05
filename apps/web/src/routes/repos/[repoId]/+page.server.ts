@@ -1,5 +1,5 @@
-import { redirect } from '@sveltejs/kit';
-import type { PageServerLoad } from './$types';
+import { fail, redirect } from '@sveltejs/kit';
+import type { Actions, PageServerLoad } from './$types';
 
 type GitHubRepository = {
 	id: number;
@@ -75,6 +75,9 @@ type DependenciesResponse = {
 	total: number;
 	total_pages: number;
 	dependencies: RepositoryDependency[];
+	sync_status?: string;
+	sync_error?: string;
+	last_synced_at?: string;
 };
 
 const API_BASE_URL = 'http://localhost:8080';
@@ -103,7 +106,10 @@ export const load: PageServerLoad = async ({ cookies, fetch, params }) => {
 		return {
 			repo: null,
 			dependencyFiles: [] as DependencyFile[],
-			dependencies: [] as RepositoryDependency[]
+			dependencies: [] as RepositoryDependency[],
+			syncStatus: '',
+			syncError: '',
+			lastSyncedAt: ''
 		};
 	}
 
@@ -111,7 +117,10 @@ export const load: PageServerLoad = async ({ cookies, fetch, params }) => {
 		return {
 			repo: null,
 			dependencyFiles: [] as DependencyFile[],
-			dependencies: [] as RepositoryDependency[]
+			dependencies: [] as RepositoryDependency[],
+			syncStatus: '',
+			syncError: '',
+			lastSyncedAt: ''
 		};
 	}
 
@@ -124,7 +133,10 @@ export const load: PageServerLoad = async ({ cookies, fetch, params }) => {
 		return {
 			repo,
 			dependencyFiles: [] as DependencyFile[],
-			dependencies: dependenciesPayload?.dependencies ?? []
+			dependencies: dependenciesPayload?.dependencies ?? [],
+			syncStatus: dependenciesPayload?.sync_status ?? '',
+			syncError: dependenciesPayload?.sync_error ?? '',
+			lastSyncedAt: dependenciesPayload?.last_synced_at ?? ''
 		};
 	}
 
@@ -132,6 +144,38 @@ export const load: PageServerLoad = async ({ cookies, fetch, params }) => {
 	return {
 		repo,
 		dependencyFiles: depFilesPayload.files ?? [],
-		dependencies: dependenciesPayload?.dependencies ?? []
+		dependencies: dependenciesPayload?.dependencies ?? [],
+		syncStatus: dependenciesPayload?.sync_status ?? '',
+		syncError: dependenciesPayload?.sync_error ?? '',
+		lastSyncedAt: dependenciesPayload?.last_synced_at ?? ''
 	};
+};
+
+export const actions: Actions = {
+	fetchDeps: async ({ cookies, fetch, params }) => {
+		const session = cookies.get('session');
+		if (!session) {
+			throw redirect(302, '/auth');
+		}
+
+		const response = await fetch(
+			`${API_BASE_URL}/v1/github/repositories/${params.repoId}/dependencies/fetch`,
+			{
+				method: 'POST',
+				headers: {
+					Authorization: `Bearer ${session}`
+				}
+			}
+		);
+
+		if (response.status === 401) {
+			throw redirect(302, '/auth');
+		}
+
+		if (!response.ok) {
+			return fail(response.status, { message: 'Failed to enqueue dependency fetch' });
+		}
+
+		return { queued: true };
+	}
 };

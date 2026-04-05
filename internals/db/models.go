@@ -8,6 +8,41 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type DependencyPackage struct {
+	ID             int64              `json:"id"`
+	Manager        string             `json:"manager"`
+	Registry       string             `json:"registry"`
+	NormalizedName string             `json:"normalized_name"`
+	DisplayName    string             `json:"display_name"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DependencyPackageVersion struct {
+	ID            int64              `json:"id"`
+	PackageID     int64              `json:"package_id"`
+	Version       string             `json:"version"`
+	Creator       string             `json:"creator"`
+	Description   string             `json:"description"`
+	License       string             `json:"license"`
+	Homepage      string             `json:"homepage"`
+	RepositoryUrl string             `json:"repository_url"`
+	RegistryUrl   string             `json:"registry_url"`
+	ReleasedAt    pgtype.Timestamptz `json:"released_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DependencyVersionDependency struct {
+	ID             int64              `json:"id"`
+	FromVersionID  int64              `json:"from_version_id"`
+	ToVersionID    int64              `json:"to_version_id"`
+	DependencyType string             `json:"dependency_type"`
+	VersionSpec    string             `json:"version_spec"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Repository struct {
 	ID            int64              `json:"id"`
 	UserID        int64              `json:"user_id"`
@@ -19,6 +54,41 @@ type Repository struct {
 	HtmlUrl       string             `json:"html_url"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type RepositoryDependency struct {
+	ID                int64              `json:"id"`
+	RepositoryID      int64              `json:"repository_id"`
+	PackageID         int64              `json:"package_id"`
+	SourceFile        string             `json:"source_file"`
+	Scope             string             `json:"scope"`
+	VersionSpec       string             `json:"version_spec"`
+	ResolvedVersionID pgtype.Int8        `json:"resolved_version_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type RepositoryDependencyFile struct {
+	ID           int64              `json:"id"`
+	RepositoryID int64              `json:"repository_id"`
+	Path         string             `json:"path"`
+	File         string             `json:"file"`
+	Manager      string             `json:"manager"`
+	Registry     string             `json:"registry"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type RepositoryDependencySync struct {
+	ID           int64              `json:"id"`
+	RepositoryID int64              `json:"repository_id"`
+	Status       string             `json:"status"`
+	Trigger      string             `json:"trigger"`
+	ErrorMessage string             `json:"error_message"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	FinishedAt   pgtype.Timestamptz `json:"finished_at"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type User struct {

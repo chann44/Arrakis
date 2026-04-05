@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { PageData } from './$types';
 
-	let { data }: { data: PageData } = $props();
+	let { data, form }: { data: PageData; form: any } = $props();
 	let tab = $state<'dependency-files' | 'dependencies'>('dependency-files');
 
 	const formattedUpdatedAt = $derived(
@@ -17,9 +17,25 @@
 		}
 		return [...registries].sort((a, b) => a.localeCompare(b));
 	});
+
+	const shouldShowFetchDeps = $derived(
+		(data.dependencies?.length ?? 0) === 0 || (data.dependencyFiles?.length ?? 0) === 0
+	);
 </script>
 
 <div class="soc-page">
+	{#if form && typeof form === 'object' && 'queued' in form && form.queued}
+		<section class="soc-section mb-3 border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-800">
+			Dependency fetch job queued. Refresh in a moment to see updated results.
+		</section>
+	{/if}
+
+	{#if form && typeof form === 'object' && 'message' in form && form.message}
+		<section class="soc-section mb-3 border border-rose-300 bg-rose-50 p-3 text-xs text-rose-800">
+			{form.message}
+		</section>
+	{/if}
+
 	<div class="flex items-center gap-2 text-xs">
 		<a class="text-primary" href="/repos">&larr; repos</a>
 		<span class="text-muted-foreground">/</span>
@@ -70,6 +86,28 @@
 					<a class="soc-btn-primary inline-block" href={data.repo.html_url} target="_blank" rel="noreferrer">
 						Open on GitHub
 					</a>
+					<form method="POST" action="?/fetchDeps" class="inline-block">
+						<button class={shouldShowFetchDeps ? 'soc-btn-primary' : 'soc-btn'} type="submit">
+							Fetch Deps
+						</button>
+					</form>
+					{#if data.syncStatus}
+						<div class="rounded border border-border p-2 text-[11px]">
+							<div class="flex items-center justify-between">
+								<span class="soc-subtle">Sync status</span>
+								<span>{data.syncStatus}</span>
+							</div>
+							{#if data.lastSyncedAt}
+								<div class="flex items-center justify-between">
+									<span class="soc-subtle">Last synced</span>
+									<span>{new Date(data.lastSyncedAt).toLocaleString()}</span>
+								</div>
+							{/if}
+							{#if data.syncError}
+								<p class="mt-1 text-rose-700">{data.syncError}</p>
+							{/if}
+						</div>
+					{/if}
 					<p class="soc-subtle">Description</p>
 					<p class="text-sm">{data.repo.description || 'No description available.'}</p>
 				</div>

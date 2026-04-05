@@ -36,11 +36,13 @@ type npmRegistryResponse struct {
 		Name string `json:"name"`
 	} `json:"maintainers"`
 	Versions map[string]struct {
-		Description  string            `json:"description"`
-		License      string            `json:"license"`
-		Homepage     string            `json:"homepage"`
-		Dependencies map[string]string `json:"dependencies"`
-		Repository   struct {
+		Description          string            `json:"description"`
+		License              string            `json:"license"`
+		Homepage             string            `json:"homepage"`
+		Dependencies         map[string]string `json:"dependencies"`
+		PeerDependencies     map[string]string `json:"peerDependencies"`
+		OptionalDependencies map[string]string `json:"optionalDependencies"`
+		Repository           struct {
 			URL string `json:"url"`
 		} `json:"repository"`
 	} `json:"versions"`
@@ -107,6 +109,27 @@ func GetNPMPackageMetadata(ctx context.Context, packageName string) (*NPMPackage
 			VersionSpec: strings.TrimSpace(depVersion),
 			Manager:     "npm",
 			Registry:    "npm",
+			Scope:       "prod",
+		})
+	}
+
+	for depName, depVersion := range versionPayload.PeerDependencies {
+		metadata.Dependencies = append(metadata.Dependencies, PackageDependency{
+			Name:        strings.TrimSpace(depName),
+			VersionSpec: strings.TrimSpace(depVersion),
+			Manager:     "npm",
+			Registry:    "npm",
+			Scope:       "peer",
+		})
+	}
+
+	for depName, depVersion := range versionPayload.OptionalDependencies {
+		metadata.Dependencies = append(metadata.Dependencies, PackageDependency{
+			Name:        strings.TrimSpace(depName),
+			VersionSpec: strings.TrimSpace(depVersion),
+			Manager:     "npm",
+			Registry:    "npm",
+			Scope:       "optional",
 		})
 	}
 

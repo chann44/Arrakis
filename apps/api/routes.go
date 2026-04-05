@@ -30,6 +30,7 @@ func registerRoutes(r chi.Router, h *Handler) {
 			r.Get("/github/repositories/{repoID}", h.githubRepositoryByID)
 			r.Get("/github/repositories/{repoID}/dependency-files", h.githubRepositoryDependencyFiles)
 			r.Get("/github/repositories/{repoID}/dependencies", h.githubRepositoryDependencies)
+			r.Post("/github/repositories/{repoID}/dependencies/fetch", h.fetchRepositoryDependencies)
 			r.Post("/github/repositories/{repoID}/connect", h.connectGitHubRepository)
 		})
 	})

@@ -9,13 +9,27 @@ import (
 )
 
 type Querier interface {
+	CreateRepositoryDependencySync(ctx context.Context, arg CreateRepositoryDependencySyncParams) (RepositoryDependencySync, error)
+	DeleteRepositoryDependenciesByRepo(ctx context.Context, repositoryID int64) error
+	DeleteRepositoryDependencyFilesByRepo(ctx context.Context, repositoryID int64) error
 	DeleteUserRepositories(ctx context.Context, userID int64) error
 	GetUserByID(ctx context.Context, id int64) (User, error)
 	GetUserOAuthToken(ctx context.Context, arg GetUserOAuthTokenParams) (UserOauthToken, error)
+	ListDependencyEdgesByFromVersion(ctx context.Context, fromVersionID int64) ([]ListDependencyEdgesByFromVersionRow, error)
+	ListLatestRepositoryDependencySync(ctx context.Context, repositoryID int64) ([]RepositoryDependencySync, error)
+	ListRepositoryDependenciesDetailed(ctx context.Context, repositoryID int64) ([]ListRepositoryDependenciesDetailedRow, error)
+	ListRepositoryDependencyFiles(ctx context.Context, repositoryID int64) ([]RepositoryDependencyFile, error)
 	ListUserGitHubInstallations(ctx context.Context, userID int64) ([]UserGithubInstallation, error)
 	ListUserRepositories(ctx context.Context, userID int64) ([]Repository, error)
+	MarkRepositoryDependencySyncFailed(ctx context.Context, arg MarkRepositoryDependencySyncFailedParams) error
+	MarkRepositoryDependencySyncSuccess(ctx context.Context, id int64) error
+	UpsertDependencyPackage(ctx context.Context, arg UpsertDependencyPackageParams) (DependencyPackage, error)
+	UpsertDependencyPackageVersion(ctx context.Context, arg UpsertDependencyPackageVersionParams) (DependencyPackageVersion, error)
+	UpsertDependencyVersionDependency(ctx context.Context, arg UpsertDependencyVersionDependencyParams) error
 	UpsertGitHubUser(ctx context.Context, arg UpsertGitHubUserParams) (User, error)
 	UpsertRepository(ctx context.Context, arg UpsertRepositoryParams) error
+	UpsertRepositoryDependency(ctx context.Context, arg UpsertRepositoryDependencyParams) error
+	UpsertRepositoryDependencyFile(ctx context.Context, arg UpsertRepositoryDependencyFileParams) error
 	UpsertUserGitHubInstallation(ctx context.Context, arg UpsertUserGitHubInstallationParams) error
 	UpsertUserOAuthToken(ctx context.Context, arg UpsertUserOAuthTokenParams) error
 }

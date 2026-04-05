@@ -10,8 +10,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"path"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -19,8 +17,10 @@ import (
 	"github.com/chann44/TGE/adapters"
 	internal "github.com/chann44/TGE/internals"
 	db "github.com/chann44/TGE/internals/db"
+	"github.com/chann44/TGE/internals/jobs"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -33,9 +33,10 @@ func generateState() (string, error) {
 }
 
 type Handler struct {
-	cfg     *internal.Config
-	redis   *adapters.Redis
-	queries *db.Queries
+	cfg         *internal.Config
+	redis       *adapters.Redis
+	queries     *db.Queries
+	asynqClient *asynq.Client
 }
 
 type githubRepositoryResponse struct {
@@ -95,8 +96,8 @@ type dependencyFilesResponse struct {
 	Files        []dependencyFileResponse `json:"files"`
 }
 
-func NewHandler(cfg *internal.Config, redisClient *adapters.Redis, queries *db.Queries) *Handler {
-	return &Handler{cfg: cfg, redis: redisClient, queries: queries}
+func NewHandler(cfg *internal.Config, redisClient *adapters.Redis, queries *db.Queries, asynqClient *asynq.Client) *Handler {
+	return &Handler{cfg: cfg, redis: redisClient, queries: queries, asynqClient: asynqClient}
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -285,6 +286,43 @@ func queryInt(raw string, fallback int) int {
 		return fallback
 	}
 	return v
+}
+
+func (h *Handler) enqueueDependencySync(ctx context.Context, userID, repoID int64, trigger string, force bool) error {
+	if h.asynqClient == nil {
+		return fmt.Errorf("background queue is not configured")
+	}
+
+	task, err := jobs.NewDependencySyncTask(jobs.DependencySyncPayload{
+		UserID:  userID,
+		RepoID:  repoID,
+		Trigger: trigger,
+		Force:   force,
+	})
+	if err != nil {
+		return err
+	}
+
+	taskID := fmt.Sprintf("deps:%d:%d", userID, repoID)
+	if force {
+		taskID = fmt.Sprintf("deps:%d:%d:%d", userID, repoID, time.Now().UnixNano())
+	}
+
+	_, err = h.asynqClient.EnqueueContext(
+		ctx,
+		task,
+		asynq.Queue("dependencies"),
+		asynq.TaskID(taskID),
+		asynq.MaxRetry(5),
+		asynq.Timeout(30*time.Minute),
+	)
+	if err != nil {
+		if errors.Is(err, asynq.ErrTaskIDConflict) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (h *Handler) githubLogin(w http.ResponseWriter, r *http.Request) {
@@ -514,6 +552,9 @@ storeDone:
 		http.Redirect(w, r, h.frontendRedirect("/repos", map[string]string{"app_setup": "connect_failed"}), http.StatusTemporaryRedirect)
 		return
 	}
+	if err := h.enqueueDependencySync(r.Context(), connectState.UserID, repository.ID, "connect", false); err != nil {
+		h.requestLog(r, "github app setup failed enqueueing dependency sync user_id=%d repo_id=%d error=%v", connectState.UserID, repository.ID, err)
+	}
 	h.requestLog(r, "github app setup connected repo user_id=%d repo_id=%d installation_id=%d", connectState.UserID, repository.ID, installationID)
 
 	redirectURL := h.frontendRedirect(fmt.Sprintf("/repos/%d", repository.ID), map[string]string{"connected": "1"})
@@ -742,69 +783,31 @@ func (h *Handler) githubRepositoryDependencyFiles(w http.ResponseWriter, r *http
 		return
 	}
 
-	connectedRepos, err := h.queries.ListUserRepositories(r.Context(), userID)
-	if err != nil {
-		http.Error(w, "failed to fetch connected repositories", http.StatusInternalServerError)
-		return
-	}
-
-	connected := false
-	for _, repo := range connectedRepos {
-		if repo.GithubRepoID == repoID {
-			connected = true
-			break
-		}
-	}
+	repo, connected := connectedRepositoryForUser(r.Context(), h.queries, userID, repoID)
 	if !connected {
 		http.Error(w, "repository is not connected", http.StatusNotFound)
 		return
 	}
 
-	installationToken, repository, err := h.installationTokenForRepo(r.Context(), userID, repoID)
+	rows, err := h.queries.ListRepositoryDependencyFiles(r.Context(), repoID)
 	if err != nil {
-		http.Error(w, "github app installation access not found for repository", http.StatusForbidden)
+		http.Error(w, "failed to fetch repository dependency files", http.StatusInternalServerError)
 		return
 	}
 
-	owner, repoName, ok := strings.Cut(repository.FullName, "/")
-	if !ok || strings.TrimSpace(owner) == "" || strings.TrimSpace(repoName) == "" {
-		http.Error(w, "invalid repository full name", http.StatusBadGateway)
-		return
-	}
-
-	tree, err := adapters.ListRepositoryTree(r.Context(), installationToken, owner, repoName, repository.DefaultBranch)
-	if err != nil {
-		http.Error(w, "failed to fetch repository tree", http.StatusBadGateway)
-		return
-	}
-
-	dependencyFiles := make([]dependencyFileResponse, 0)
-	for _, entry := range tree {
-		if entry.Type != "blob" {
-			continue
-		}
-
-		name := path.Base(entry.Path)
-		manager := dependencyManagerForFile(name)
-		if manager == "" {
-			continue
-		}
-
+	dependencyFiles := make([]dependencyFileResponse, 0, len(rows))
+	for _, row := range rows {
 		dependencyFiles = append(dependencyFiles, dependencyFileResponse{
-			Path:     entry.Path,
-			File:     name,
-			Manager:  manager,
-			Registry: registryForManager(manager),
+			Path:     row.Path,
+			File:     row.File,
+			Manager:  row.Manager,
+			Registry: row.Registry,
 		})
 	}
 
-	sort.Slice(dependencyFiles, func(i, j int) bool {
-		return dependencyFiles[i].Path < dependencyFiles[j].Path
-	})
-
 	writeJSON(w, http.StatusOK, dependencyFilesResponse{
 		RepositoryID: repoID,
-		FullName:     repository.FullName,
+		FullName:     repo.FullName,
 		Files:        dependencyFiles,
 	})
 }
@@ -931,5 +934,48 @@ func (h *Handler) connectGitHubRepository(w http.ResponseWriter, r *http.Request
 		RepoID:        selectedRepo.ID,
 		InstallNeeded: true,
 		RedirectURL:   redirectURL,
+	})
+}
+
+func (h *Handler) fetchRepositoryDependencies(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	repoIDText := chi.URLParam(r, "repoID")
+	repoID, err := strconv.ParseInt(repoIDText, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid repository id", http.StatusBadRequest)
+		return
+	}
+
+	connectedRepos, err := h.queries.ListUserRepositories(r.Context(), userID)
+	if err != nil {
+		http.Error(w, "failed to fetch connected repositories", http.StatusInternalServerError)
+		return
+	}
+
+	connected := false
+	for _, repo := range connectedRepos {
+		if repo.GithubRepoID == repoID {
+			connected = true
+			break
+		}
+	}
+	if !connected {
+		http.Error(w, "repository is not connected", http.StatusNotFound)
+		return
+	}
+
+	if err := h.enqueueDependencySync(r.Context(), userID, repoID, "manual", true); err != nil {
+		http.Error(w, "failed to enqueue dependency fetch", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"queued":  true,
+		"repo_id": repoID,
 	})
 }

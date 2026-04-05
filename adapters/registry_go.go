@@ -138,6 +138,7 @@ func parseGoModDependenciesFromContent(content string) []PackageDependency {
 			VersionSpec: version,
 			Manager:     "go",
 			Registry:    "github",
+			Scope:       "default",
 		})
 	}
 

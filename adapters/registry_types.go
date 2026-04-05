@@ -5,4 +5,5 @@ type PackageDependency struct {
 	VersionSpec string
 	Manager     string
 	Registry    string
+	Scope       string
 }

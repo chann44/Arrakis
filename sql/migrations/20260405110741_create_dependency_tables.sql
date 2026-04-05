@@ -1,51 +1,5 @@
-CREATE TABLE IF NOT EXISTS users (
-    id BIGSERIAL PRIMARY KEY,
-    github_id BIGINT NOT NULL UNIQUE,
-    login TEXT NOT NULL,
-    name TEXT NOT NULL DEFAULT '',
-    email TEXT NOT NULL DEFAULT '',
-    avatar_url TEXT NOT NULL DEFAULT '',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS user_oauth_tokens (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    provider TEXT NOT NULL,
-    access_token TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (user_id, provider)
-);
-
-CREATE TABLE IF NOT EXISTS repositories (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    github_repo_id BIGINT NOT NULL,
-    name TEXT NOT NULL,
-    full_name TEXT NOT NULL,
-    private BOOLEAN NOT NULL DEFAULT FALSE,
-    default_branch TEXT NOT NULL DEFAULT '',
-    html_url TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (user_id, github_repo_id)
-);
-
-CREATE TABLE IF NOT EXISTS user_github_installations (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    installation_id BIGINT NOT NULL,
-    app_slug TEXT NOT NULL DEFAULT '',
-    account_login TEXT NOT NULL DEFAULT '',
-    account_type TEXT NOT NULL DEFAULT '',
-    html_url TEXT NOT NULL DEFAULT '',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (user_id, installation_id)
-);
-
+-- +goose Up
+-- +goose StatementBegin
 CREATE TABLE IF NOT EXISTS dependency_packages (
     id BIGSERIAL PRIMARY KEY,
     manager TEXT NOT NULL,
@@ -148,3 +102,23 @@ ON repository_dependencies (package_id);
 
 CREATE INDEX IF NOT EXISTS repository_dependency_syncs_repository_id_idx
 ON repository_dependency_syncs (repository_id, started_at DESC);
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+DROP INDEX IF EXISTS repository_dependency_syncs_repository_id_idx;
+DROP INDEX IF EXISTS repository_dependencies_package_id_idx;
+DROP INDEX IF EXISTS repository_dependencies_repository_id_idx;
+DROP INDEX IF EXISTS repository_dependency_files_repository_id_idx;
+DROP INDEX IF EXISTS dependency_version_dependencies_to_version_idx;
+DROP INDEX IF EXISTS dependency_version_dependencies_from_version_idx;
+DROP INDEX IF EXISTS dependency_package_versions_package_id_idx;
+DROP INDEX IF EXISTS dependency_packages_lookup_idx;
+
+DROP TABLE IF EXISTS repository_dependency_syncs;
+DROP TABLE IF EXISTS repository_dependencies;
+DROP TABLE IF EXISTS repository_dependency_files;
+DROP TABLE IF EXISTS dependency_version_dependencies;
+DROP TABLE IF EXISTS dependency_package_versions;
+DROP TABLE IF EXISTS dependency_packages;
+-- +goose StatementEnd
