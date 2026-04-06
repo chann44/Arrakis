@@ -5,8 +5,141 @@
 package db
 
 import (
+	"database/sql/driver"
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+type CustomSourceFormat string
+
+const (
+	CustomSourceFormatOsv CustomSourceFormat = "osv"
+	CustomSourceFormatNvd CustomSourceFormat = "nvd"
+)
+
+func (e *CustomSourceFormat) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CustomSourceFormat(s)
+	case string:
+		*e = CustomSourceFormat(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CustomSourceFormat: %T", src)
+	}
+	return nil
+}
+
+type NullCustomSourceFormat struct {
+	CustomSourceFormat CustomSourceFormat `json:"custom_source_format"`
+	Valid              bool               `json:"valid"` // Valid is true if CustomSourceFormat is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCustomSourceFormat) Scan(value interface{}) error {
+	if value == nil {
+		ns.CustomSourceFormat, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CustomSourceFormat.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCustomSourceFormat) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CustomSourceFormat), nil
+}
+
+type Severity string
+
+const (
+	SeverityLow      Severity = "low"
+	SeverityMedium   Severity = "medium"
+	SeverityHigh     Severity = "high"
+	SeverityCritical Severity = "critical"
+)
+
+func (e *Severity) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = Severity(s)
+	case string:
+		*e = Severity(s)
+	default:
+		return fmt.Errorf("unsupported scan type for Severity: %T", src)
+	}
+	return nil
+}
+
+type NullSeverity struct {
+	Severity Severity `json:"severity"`
+	Valid    bool     `json:"valid"` // Valid is true if Severity is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullSeverity) Scan(value interface{}) error {
+	if value == nil {
+		ns.Severity, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.Severity.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullSeverity) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.Severity), nil
+}
+
+type TriggerType string
+
+const (
+	TriggerTypePush        TriggerType = "push"
+	TriggerTypePullRequest TriggerType = "pull_request"
+	TriggerTypeSchedule    TriggerType = "schedule"
+	TriggerTypeManual      TriggerType = "manual"
+)
+
+func (e *TriggerType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TriggerType(s)
+	case string:
+		*e = TriggerType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TriggerType: %T", src)
+	}
+	return nil
+}
+
+type NullTriggerType struct {
+	TriggerType TriggerType `json:"trigger_type"`
+	Valid       bool        `json:"valid"` // Valid is true if TriggerType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTriggerType) Scan(value interface{}) error {
+	if value == nil {
+		ns.TriggerType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TriggerType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTriggerType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TriggerType), nil
+}
 
 type DependencyPackage struct {
 	ID             int64              `json:"id"`
@@ -41,6 +174,77 @@ type DependencyVersionDependency struct {
 	VersionSpec    string             `json:"version_spec"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Policy struct {
+	ID        int64              `json:"id"`
+	UserID    int64              `json:"user_id"`
+	Name      string             `json:"name"`
+	Enabled   bool               `json:"enabled"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type PolicyRegistry struct {
+	PolicyID          int64    `json:"policy_id"`
+	PushEnabled       bool     `json:"push_enabled"`
+	PushUrl           string   `json:"push_url"`
+	PushSigningKeyRef string   `json:"push_signing_key_ref"`
+	PullEnabled       bool     `json:"pull_enabled"`
+	PullUrl           string   `json:"pull_url"`
+	PullTrustedKeys   []string `json:"pull_trusted_keys"`
+	PullMaxAgeDays    int32    `json:"pull_max_age_days"`
+}
+
+type PolicyRepository struct {
+	RepositoryID int64              `json:"repository_id"`
+	PolicyID     int64              `json:"policy_id"`
+	AssignedAt   pgtype.Timestamptz `json:"assigned_at"`
+}
+
+type PolicySast struct {
+	PolicyID          int64    `json:"policy_id"`
+	Enabled           bool     `json:"enabled"`
+	PatternsEnabled   bool     `json:"patterns_enabled"`
+	Rulesets          []string `json:"rulesets"`
+	MinSeverity       Severity `json:"min_severity"`
+	ExcludePaths      []string `json:"exclude_paths"`
+	AiEnabled         bool     `json:"ai_enabled"`
+	AiMaxFilesPerScan int32    `json:"ai_max_files_per_scan"`
+	AiReachability    bool     `json:"ai_reachability"`
+	AiSuggestFix      bool     `json:"ai_suggest_fix"`
+}
+
+type PolicySource struct {
+	PolicyID           int64  `json:"policy_id"`
+	RegistryFirst      bool   `json:"registry_first"`
+	RegistryMaxAgeDays int32  `json:"registry_max_age_days"`
+	RegistryOnly       bool   `json:"registry_only"`
+	OsvEnabled         bool   `json:"osv_enabled"`
+	GhsaEnabled        bool   `json:"ghsa_enabled"`
+	GhsaTokenRef       string `json:"ghsa_token_ref"`
+	NvdEnabled         bool   `json:"nvd_enabled"`
+	NvdApiKeyRef       string `json:"nvd_api_key_ref"`
+	GovulncheckEnabled bool   `json:"govulncheck_enabled"`
+}
+
+type PolicySourceCustom struct {
+	ID         int64              `json:"id"`
+	PolicyID   int64              `json:"policy_id"`
+	Name       string             `json:"name"`
+	Url        string             `json:"url"`
+	Format     CustomSourceFormat `json:"format"`
+	AuthHeader string             `json:"auth_header"`
+}
+
+type PolicyTrigger struct {
+	ID        int64              `json:"id"`
+	PolicyID  int64              `json:"policy_id"`
+	Type      TriggerType        `json:"type"`
+	Branches  []string           `json:"branches"`
+	Cron      pgtype.Text        `json:"cron"`
+	Timezone  string             `json:"timezone"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type Repository struct {

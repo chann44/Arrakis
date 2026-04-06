@@ -11,25 +11,43 @@ import (
 )
 
 type Querier interface {
+	AssignPolicyToRepository(ctx context.Context, arg AssignPolicyToRepositoryParams) error
 	CountDependencyEdgesByFromVersion(ctx context.Context, fromVersionID int64) (int64, error)
 	CountRepositoryDependenciesByRepo(ctx context.Context, repositoryID int64) (int64, error)
 	CountRepositoryDependencyFilesByRepo(ctx context.Context, repositoryID int64) (int64, error)
 	CountRepositoryDependencySyncByStatus(ctx context.Context, status string) (int64, error)
 	CountRepositoryDependencySyncFailedSince(ctx context.Context, finishedAt pgtype.Timestamptz) (int64, error)
 	CountRepositoryDependencySyncSuccessSince(ctx context.Context, finishedAt pgtype.Timestamptz) (int64, error)
+	CreatePolicy(ctx context.Context, arg CreatePolicyParams) (Policy, error)
+	CreatePolicyCustomSource(ctx context.Context, arg CreatePolicyCustomSourceParams) error
+	CreatePolicyTrigger(ctx context.Context, arg CreatePolicyTriggerParams) error
 	CreateRepositoryDependencySync(ctx context.Context, arg CreateRepositoryDependencySyncParams) (RepositoryDependencySync, error)
 	CreateServiceStatusSnapshot(ctx context.Context, arg CreateServiceStatusSnapshotParams) error
+	DeletePolicyByIDAndUser(ctx context.Context, arg DeletePolicyByIDAndUserParams) error
+	DeletePolicyCustomSourcesByPolicy(ctx context.Context, policyID int64) error
+	DeletePolicyRepositoryAssignmentsByPolicy(ctx context.Context, policyID int64) error
+	DeletePolicyTriggersByPolicy(ctx context.Context, policyID int64) error
 	DeleteRepositoryDependenciesByRepo(ctx context.Context, repositoryID int64) error
 	DeleteRepositoryDependencyFilesByRepo(ctx context.Context, repositoryID int64) error
 	DeleteUserRepositories(ctx context.Context, userID int64) error
 	GetDependencyPackageByKey(ctx context.Context, arg GetDependencyPackageByKeyParams) (DependencyPackage, error)
 	GetDependencyPackageVersionByPackageAndVersion(ctx context.Context, arg GetDependencyPackageVersionByPackageAndVersionParams) (DependencyPackageVersion, error)
+	GetPolicyByIDAndUser(ctx context.Context, arg GetPolicyByIDAndUserParams) (Policy, error)
+	GetPolicyRegistryByPolicy(ctx context.Context, policyID int64) (PolicyRegistry, error)
+	GetPolicySastByPolicy(ctx context.Context, policyID int64) (PolicySast, error)
+	GetPolicySourcesByPolicy(ctx context.Context, policyID int64) (PolicySource, error)
+	GetRepositoryPolicyByGitHubRepoIDAndUser(ctx context.Context, arg GetRepositoryPolicyByGitHubRepoIDAndUserParams) (Policy, error)
 	GetUserByID(ctx context.Context, id int64) (User, error)
 	GetUserOAuthToken(ctx context.Context, arg GetUserOAuthTokenParams) (UserOauthToken, error)
+	GetUserRepositoryByGitHubRepoID(ctx context.Context, arg GetUserRepositoryByGitHubRepoIDParams) (Repository, error)
 	ListActiveRepositoryDependencySync(ctx context.Context, repositoryID int64) ([]RepositoryDependencySync, error)
 	ListDependencyEdgesByFromVersion(ctx context.Context, fromVersionID int64) ([]ListDependencyEdgesByFromVersionRow, error)
 	ListLatestRepositoryDependencySync(ctx context.Context, repositoryID int64) ([]RepositoryDependencySync, error)
 	ListLatestServiceStatusSnapshots(ctx context.Context) ([]ServiceStatusSnapshot, error)
+	ListPoliciesByUser(ctx context.Context, userID int64) ([]ListPoliciesByUserRow, error)
+	ListPolicyCustomSourcesByPolicy(ctx context.Context, policyID int64) ([]PolicySourceCustom, error)
+	ListPolicyRepositoriesByPolicyAndUser(ctx context.Context, arg ListPolicyRepositoriesByPolicyAndUserParams) ([]ListPolicyRepositoriesByPolicyAndUserRow, error)
+	ListPolicyTriggersByPolicy(ctx context.Context, policyID int64) ([]PolicyTrigger, error)
 	ListRepositoryDependenciesDetailed(ctx context.Context, repositoryID int64) ([]ListRepositoryDependenciesDetailedRow, error)
 	ListRepositoryDependencyFiles(ctx context.Context, repositoryID int64) ([]RepositoryDependencyFile, error)
 	ListUserGitHubInstallations(ctx context.Context, userID int64) ([]UserGithubInstallation, error)
@@ -37,10 +55,16 @@ type Querier interface {
 	MarkRepositoryDependencySyncFailed(ctx context.Context, arg MarkRepositoryDependencySyncFailedParams) error
 	MarkRepositoryDependencySyncRunning(ctx context.Context, id int64) error
 	MarkRepositoryDependencySyncSuccess(ctx context.Context, id int64) error
+	SetPolicyEnabledByIDAndUser(ctx context.Context, arg SetPolicyEnabledByIDAndUserParams) (Policy, error)
+	UnassignPolicyFromRepository(ctx context.Context, repositoryID int64) error
+	UpdatePolicyByIDAndUser(ctx context.Context, arg UpdatePolicyByIDAndUserParams) (Policy, error)
 	UpsertDependencyPackage(ctx context.Context, arg UpsertDependencyPackageParams) (DependencyPackage, error)
 	UpsertDependencyPackageVersion(ctx context.Context, arg UpsertDependencyPackageVersionParams) (DependencyPackageVersion, error)
 	UpsertDependencyVersionDependency(ctx context.Context, arg UpsertDependencyVersionDependencyParams) error
 	UpsertGitHubUser(ctx context.Context, arg UpsertGitHubUserParams) (User, error)
+	UpsertPolicyRegistry(ctx context.Context, arg UpsertPolicyRegistryParams) error
+	UpsertPolicySast(ctx context.Context, arg UpsertPolicySastParams) error
+	UpsertPolicySources(ctx context.Context, arg UpsertPolicySourcesParams) error
 	UpsertRepository(ctx context.Context, arg UpsertRepositoryParams) error
 	UpsertRepositoryDependency(ctx context.Context, arg UpsertRepositoryDependencyParams) error
 	UpsertRepositoryDependencyFile(ctx context.Context, arg UpsertRepositoryDependencyFileParams) error
