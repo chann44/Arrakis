@@ -22,6 +22,7 @@ type Querier interface {
 	CountRepositoryScansByStatus(ctx context.Context, status string) (int64, error)
 	CountRepositoryScansFailedSince(ctx context.Context, finishedAt pgtype.Timestamptz) (int64, error)
 	CountRepositoryScansSuccessSince(ctx context.Context, finishedAt pgtype.Timestamptz) (int64, error)
+	CreateCustomDomain(ctx context.Context, arg CreateCustomDomainParams) (CustomDomain, error)
 	CreatePolicy(ctx context.Context, arg CreatePolicyParams) (Policy, error)
 	CreatePolicyCustomSource(ctx context.Context, arg CreatePolicyCustomSourceParams) error
 	CreatePolicyTrigger(ctx context.Context, arg CreatePolicyTriggerParams) error
@@ -36,7 +37,9 @@ type Querier interface {
 	DeletePolicyTriggersByPolicy(ctx context.Context, policyID int64) error
 	DeleteRepositoryDependenciesByRepo(ctx context.Context, repositoryID int64) error
 	DeleteRepositoryDependencyFilesByRepo(ctx context.Context, repositoryID int64) error
+	DeleteUserCustomDomain(ctx context.Context, arg DeleteUserCustomDomainParams) (int64, error)
 	DeleteUserRepositories(ctx context.Context, userID int64) error
+	GetCustomDomainByHostname(ctx context.Context, hostname string) (CustomDomain, error)
 	GetDependencyPackageByKey(ctx context.Context, arg GetDependencyPackageByKeyParams) (DependencyPackage, error)
 	GetDependencyPackageVersionByPackageAndVersion(ctx context.Context, arg GetDependencyPackageVersionByPackageAndVersionParams) (DependencyPackageVersion, error)
 	GetFindingByIDAndUser(ctx context.Context, arg GetFindingByIDAndUserParams) (GetFindingByIDAndUserRow, error)
@@ -47,8 +50,10 @@ type Querier interface {
 	GetRepositoryPolicyByGitHubRepoIDAndUser(ctx context.Context, arg GetRepositoryPolicyByGitHubRepoIDAndUserParams) (Policy, error)
 	GetRepositoryScanRunByIDAndUser(ctx context.Context, arg GetRepositoryScanRunByIDAndUserParams) (GetRepositoryScanRunByIDAndUserRow, error)
 	GetUserByID(ctx context.Context, id int64) (User, error)
+	GetUserCustomDomainByID(ctx context.Context, arg GetUserCustomDomainByIDParams) (CustomDomain, error)
 	GetUserOAuthToken(ctx context.Context, arg GetUserOAuthTokenParams) (UserOauthToken, error)
 	GetUserRepositoryByGitHubRepoID(ctx context.Context, arg GetUserRepositoryByGitHubRepoIDParams) (Repository, error)
+	ListActiveCustomDomains(ctx context.Context) ([]CustomDomain, error)
 	ListActiveRepositoryDependencySync(ctx context.Context, repositoryID int64) ([]RepositoryDependencySync, error)
 	ListDependencyEdgesByFromVersion(ctx context.Context, fromVersionID int64) ([]ListDependencyEdgesByFromVersionRow, error)
 	ListFindingsByUser(ctx context.Context, userID int64) ([]ListFindingsByUserRow, error)
@@ -69,8 +74,12 @@ type Querier interface {
 	ListRepositoryScanRunsByRepoAndUser(ctx context.Context, arg ListRepositoryScanRunsByRepoAndUserParams) ([]ListRepositoryScanRunsByRepoAndUserRow, error)
 	ListRepositoryScanRunsByUser(ctx context.Context, userID int64) ([]ListRepositoryScanRunsByUserRow, error)
 	ListScheduledPolicyRepositoryTargets(ctx context.Context) ([]ListScheduledPolicyRepositoryTargetsRow, error)
+	ListUserCustomDomains(ctx context.Context, userID int64) ([]CustomDomain, error)
 	ListUserGitHubInstallations(ctx context.Context, userID int64) ([]UserGithubInstallation, error)
 	ListUserRepositories(ctx context.Context, userID int64) ([]Repository, error)
+	MarkCustomDomainActive(ctx context.Context, id int64) (CustomDomain, error)
+	MarkCustomDomainError(ctx context.Context, arg MarkCustomDomainErrorParams) (CustomDomain, error)
+	MarkCustomDomainPendingDNS(ctx context.Context, arg MarkCustomDomainPendingDNSParams) (CustomDomain, error)
 	MarkRepositoryDependencySyncFailed(ctx context.Context, arg MarkRepositoryDependencySyncFailedParams) error
 	MarkRepositoryDependencySyncRunning(ctx context.Context, id int64) error
 	MarkRepositoryDependencySyncSuccess(ctx context.Context, id int64) error

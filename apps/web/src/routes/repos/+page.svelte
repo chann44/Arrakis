@@ -19,6 +19,13 @@
 			? `/repos?page=${data.page + 1}&page_size=${data.pageSize}`
 			: ''
 	);
+
+	const installGithubAppHref = $derived.by(() => {
+		if (browser && window.location.hostname === 'localhost') {
+			return 'http://localhost:8080/v1/auth/github/app/install';
+		}
+		return '/api/v1/auth/github/app/install';
+	});
 </script>
 
 <div class="soc-page">
@@ -56,7 +63,7 @@
 				Showing {data.repositories.length} of {data.total} (page {data.page}
 				{#if data.totalPages > 0} / {data.totalPages}{/if})
 			</span>
-			<a class="soc-btn-primary" href="http://localhost:8080/v1/auth/github/app/install">
+			<a class="soc-btn-primary" href={installGithubAppHref}>
 				Install GitHub App
 			</a>
 		</div>

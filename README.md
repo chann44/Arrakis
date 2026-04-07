@@ -62,10 +62,30 @@ cp .env.example .env
 docker compose -f deployments/selfhost.compose.yml up -d
 ```
 
-Web UI: `http://localhost:3000`
-API: `http://localhost:8080`
+Self-host compose uses Traefik and serves web + API on one domain (`/` and `/api`).
 
-If those ports are already used, set `WEB_PORT` / `API_PORT` in `.env` before startup.
+Set these required values in `.env` before startup:
+
+```bash
+TRAEFIK_ACME_EMAIL=ops@example.com
+DOMAIN_RECORD_TYPE=A
+DOMAIN_RECORD_VALUE=<your-server-public-ip>
+```
+
+Then open `http://<server-ip>/settings` and add your domain in the dashboard.
+The app will show DNS records you need to set:
+
+- TXT ownership record: `_tge-challenge.<your-domain>`
+- Traffic record: `A` (or `CNAME` if configured)
+
+After DNS propagation, click Verify in the dashboard. Traefik will publish HTTPS routes automatically.
+
+Infrastructure requirements:
+
+- Open inbound ports `80` and `443` on your host/cloud firewall
+- Ensure your DNS points to `DOMAIN_RECORD_VALUE`
+
+Traefik terminates TLS automatically with Let's Encrypt.
 
 Default images used by compose:
 

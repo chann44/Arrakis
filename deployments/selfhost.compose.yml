@@ -1,4 +1,28 @@
 services:
+  traefik:
+    image: traefik:v3.1
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.le.acme.email=${TRAEFIK_ACME_EMAIL}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.le.acme.httpchallenge=true
+      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_letsencrypt:/letsencrypt
+      - traefik_dynamic:/etc/traefik/dynamic
+    networks:
+      - tge_net
+
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -73,6 +97,8 @@ services:
       REDIS_PORT: "6379"
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "9000"
+      DOMAIN_ROUTER_SYNC_ENABLED: "true"
+      TRAEFIK_DYNAMIC_CONFIG_PATH: /etc/traefik/dynamic/custom-domains.yml
     command: ["/usr/local/bin/api"]
     depends_on:
       migrate:
@@ -86,8 +112,16 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-    ports:
-      - "${API_PORT:-8080}:8080"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.tge-api-setup.rule=PathPrefix(`/api`)
+      - traefik.http.routers.tge-api-setup.entrypoints=web
+      - traefik.http.routers.tge-api-setup.priority=100
+      - traefik.http.middlewares.tge-api-strip.stripprefix.prefixes=/api
+      - traefik.http.routers.tge-api-setup.middlewares=tge-api-strip
+      - traefik.http.services.tge-api-setup.loadbalancer.server.port=8080
+    volumes:
+      - traefik_dynamic:/etc/traefik/dynamic
     networks:
       - tge_net
 
@@ -137,12 +171,18 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    ports:
-      - "${WEB_PORT:-3000}:3000"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.tge-web-setup.rule=PathPrefix(`/`)
+      - traefik.http.routers.tge-web-setup.entrypoints=web
+      - traefik.http.routers.tge-web-setup.priority=10
+      - traefik.http.services.tge-web-setup.loadbalancer.server.port=3000
     networks:
       - tge_net
 
 volumes:
+  traefik_letsencrypt:
+  traefik_dynamic:
   postgres_data:
   redis_data:
   clickhouse_data:
