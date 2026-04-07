@@ -2,8 +2,10 @@ SHELL := /bin/sh
 
 GOOSE_DIR := sql/migrations
 SQLC_CONFIG := sqlc.yaml
+BACKEND_IMAGE ?= ghcr.io/chann44/tge-backend:latest
+WEB_IMAGE ?= ghcr.io/chann44/tge-web:latest
 
-.PHONY: help api-dev worker-dev scheduler-dev web-dev dev test fmt codegen migrate-up migrate-down migrate-status migrate-reset migrate-create
+.PHONY: help api-dev worker-dev scheduler-dev web-dev dev test fmt codegen migrate-up migrate-down migrate-status migrate-reset migrate-create docker-build-backend docker-build-web docker-push-backend docker-push-web docker-build docker-push
 
 help:
 	@printf "Available targets:\n"
@@ -20,6 +22,8 @@ help:
 	@printf "  make migrate-status    Show goose migration status\n"
 	@printf "  make migrate-reset     Roll back all goose migrations\n"
 	@printf "  make migrate-create NAME=create_users  Create a new migration\n"
+	@printf "  make docker-build      Build backend + web images\n"
+	@printf "  make docker-push       Push backend + web images\n"
 
 api-dev:
 	go run ./apps/api
@@ -93,3 +97,19 @@ migrate-create:
 		exit 1; \
 	fi
 	goose -dir $(GOOSE_DIR) create $(NAME) sql
+
+docker-build-backend:
+	docker build -f deployments/docker/Dockerfile.backend -t $(BACKEND_IMAGE) .
+
+docker-build-web:
+	docker build -f deployments/docker/Dockerfile.web -t $(WEB_IMAGE) .
+
+docker-push-backend:
+	docker push $(BACKEND_IMAGE)
+
+docker-push-web:
+	docker push $(WEB_IMAGE)
+
+docker-build: docker-build-backend docker-build-web
+
+docker-push: docker-push-backend docker-push-web

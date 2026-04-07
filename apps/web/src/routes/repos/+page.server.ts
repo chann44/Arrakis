@@ -1,5 +1,6 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
+import { getApiBaseUrl } from '$lib/server/api-base';
 
 type GitHubRepository = {
 	id: number;
@@ -26,7 +27,7 @@ type ConnectRepositoryResponse = {
 	redirect_url?: string;
 };
 
-const API_BASE_URL = 'http://localhost:8080';
+const API_BASE_URL = getApiBaseUrl();
 
 export const load: PageServerLoad = async ({ cookies, fetch, url }) => {
 	const session = cookies.get('session');

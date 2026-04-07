@@ -1,7 +1,8 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
+import { getApiBaseUrl } from '$lib/server/api-base';
 
-const API_BASE_URL = 'http://localhost:8080';
+const API_BASE_URL = getApiBaseUrl();
 
 type ScanRun = {
 	id: number;

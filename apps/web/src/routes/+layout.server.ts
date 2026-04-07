@@ -1,4 +1,5 @@
 import type { LayoutServerLoad } from './$types';
+import { getApiBaseUrl } from '$lib/server/api-base';
 
 type MeResponse = {
 	id: number;
@@ -8,7 +9,7 @@ type MeResponse = {
 	avatar_url: string;
 };
 
-const API_BASE_URL = 'http://localhost:8080';
+const API_BASE_URL = getApiBaseUrl();
 
 export const load: LayoutServerLoad = async ({ cookies, fetch }) => {
 	const session = cookies.get('session');

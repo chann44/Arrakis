@@ -1,0 +1,18 @@
+# Environment files
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Build artifacts
+bin/
+dist/
+build/
+
+# Node
+node_modules/
+
+# OS
+.DS_Store

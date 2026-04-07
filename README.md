@@ -40,7 +40,7 @@ adapters/    # github, osv, registries
 deployments/ # docker / k8s
 ```
 
-## 🐳 Run locally
+## 🐳 Run locally (dev dependencies only)
 
 ```bash
 git clone git@github.com:chann44/TGE.git
@@ -51,6 +51,27 @@ docker compose -f deployments/dev.compose.yml up -d
 ```
 
 API: `http://localhost:8080`
+
+## 🚢 Self-host with published images
+
+```bash
+git clone git@github.com:chann44/TGE.git
+cd TGE
+
+cp .env.example .env
+# set TGE_BACKEND_IMAGE and TGE_WEB_IMAGE in your shell or .env if needed
+docker compose -f deployments/selfhost.compose.yml up -d
+```
+
+Web UI: `http://localhost:3000`
+API: `http://localhost:8080`
+
+If you publish images to your own registry, set:
+
+```bash
+export TGE_BACKEND_IMAGE=your-registry/your-namespace/tge-backend:latest
+export TGE_WEB_IMAGE=your-registry/your-namespace/tge-web:latest
+```
 
 For system-health log streaming, set these `.env` values:
 
