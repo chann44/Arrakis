@@ -60,18 +60,17 @@
 	<section class="soc-section mb-3 p-3">
 		<div class="mb-3 flex items-center justify-between">
 			<p class="soc-section-label">Custom Domains</p>
-			<span class="soc-subtle text-[11px]">Serve UI + API on one domain</span>
 		</div>
 
 		<form method="POST" action="?/addDomain" class="mb-3 flex items-center gap-2">
 			<input
 				name="hostname"
-				class="soc-input"
+				class="soc-input min-w-0 flex-1"
 				placeholder="app.example.com"
 				autocomplete="off"
 				required
 			/>
-			<button class="soc-btn-primary" type="submit">Add Domain</button>
+			<button class="soc-btn-primary shrink-0 whitespace-nowrap" type="submit">Add Domain</button>
 		</form>
 
 		{#if form?.message}

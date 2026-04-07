@@ -37,9 +37,6 @@
 		<Sidebar.Header>
 			<div class="rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2">
 				<p class="text-sm font-bold tracking-tight text-primary">TGE</p>
-				<p class="text-[10px] tracking-[0.08em] text-sidebar-foreground/70 uppercase">
-					Supply Chain Scanner
-				</p>
 			</div>
 		</Sidebar.Header>
 
@@ -80,7 +77,7 @@
 				</form>
 			{/if}
 			<div class="rounded-md border border-sidebar-border bg-sidebar-accent px-2 py-1.5">
-				<p class="text-[10px] text-primary">v0.1.0 - self-hosted</p>
+				<p class="text-[10px] text-primary">v0.0.1 - self-hosted</p>
 				<div class="mt-1 flex items-center gap-1.5">
 					<span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
 					<span class="text-[10px] text-sidebar-foreground/80">All systems nominal</span>
