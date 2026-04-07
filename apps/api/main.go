@@ -60,6 +60,9 @@ func main() {
 	}()
 
 	handler := NewHandler(cfg, redisClient, clickhouseClient, centralLogger, postgresPool, queries, asynqClient)
+	if err := handler.syncTraefikDynamicDomains(ctx); err != nil {
+		log.Printf("api: failed to sync traefik dynamic config: %v", err)
+	}
 
 	r := chi.NewRouter()
 	r.Use(

@@ -46,6 +46,23 @@ CREATE TABLE IF NOT EXISTS user_github_installations (
     UNIQUE (user_id, installation_id)
 );
 
+CREATE TABLE IF NOT EXISTS custom_domains (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    hostname TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'pending_dns',
+    verification_token TEXT NOT NULL,
+    dns_record_type TEXT NOT NULL,
+    dns_record_name TEXT NOT NULL,
+    dns_record_value TEXT NOT NULL,
+    last_error TEXT NOT NULL DEFAULT '',
+    verified_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (status IN ('pending_dns', 'active', 'error')),
+    CHECK (dns_record_type IN ('A', 'CNAME'))
+);
+
 CREATE TYPE trigger_type AS ENUM ('push', 'pull_request', 'schedule', 'manual');
 CREATE TYPE severity AS ENUM ('low', 'medium', 'high', 'critical');
 CREATE TYPE custom_source_format AS ENUM ('osv', 'nvd');
@@ -340,6 +357,9 @@ ON policy_triggers (policy_id);
 
 CREATE INDEX IF NOT EXISTS policy_source_custom_policy_idx
 ON policy_source_custom (policy_id);
+
+CREATE INDEX IF NOT EXISTS custom_domains_user_id_idx
+ON custom_domains (user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS service_status_snapshots (
     id BIGSERIAL PRIMARY KEY,

@@ -141,6 +141,21 @@ func (ns NullTriggerType) Value() (driver.Value, error) {
 	return string(ns.TriggerType), nil
 }
 
+type CustomDomain struct {
+	ID                int64              `json:"id"`
+	UserID            int64              `json:"user_id"`
+	Hostname          string             `json:"hostname"`
+	Status            string             `json:"status"`
+	VerificationToken string             `json:"verification_token"`
+	DnsRecordType     string             `json:"dns_record_type"`
+	DnsRecordName     string             `json:"dns_record_name"`
+	DnsRecordValue    string             `json:"dns_record_value"`
+	LastError         string             `json:"last_error"`
+	VerifiedAt        pgtype.Timestamptz `json:"verified_at"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type DependencyPackage struct {
 	ID             int64              `json:"id"`
 	Manager        string             `json:"manager"`
