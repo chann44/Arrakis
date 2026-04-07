@@ -1,37 +1,47 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { EcoBadge, RiskScore, StatCard, StatusBadge } from '$lib/components/security';
-	import { findings, repos, scans } from '$lib/data/security-mock';
 
-	const critical = findings.filter((f) => f.sev === 'critical').length;
-	const highRiskDeps = 4;
+	let { data }: { data: any } = $props();
+
 	const isLoggedIn = $derived(Boolean(page.data.user));
-	const severity = [
-		{ label: 'critical', count: findings.filter((f) => f.sev === 'critical').length },
-		{ label: 'high', count: findings.filter((f) => f.sev === 'high').length },
-		{ label: 'medium', count: findings.filter((f) => f.sev === 'medium').length },
-		{ label: 'low', count: findings.filter((f) => f.sev === 'low').length }
-	];
+	const stats = $derived(
+		data.stats ?? {
+			repositories: 0,
+			criticalFindings: 0,
+			highRiskDeps: 0,
+			scansToday: 0,
+			lastScanLabel: '-'
+		}
+	);
+	const severity = $derived(data.severity ?? []);
+	const totalFindings = $derived(data.totalFindings ?? 0);
+	const policyStatus = $derived(data.policyStatus ?? []);
+	const recentScans = $derived(data.recentScans ?? []);
 </script>
 
 <div class="soc-page">
 	<h1 class="soc-page-title">Dashboard</h1>
 
 	<section class="soc-grid-4">
-		<StatCard label="Repositories" value={isLoggedIn ? repos.length : 0} sub="connected" />
+		<StatCard label="Repositories" value={isLoggedIn ? stats.repositories : 0} sub="connected" />
 		<StatCard
 			label="Critical Findings"
-			value={isLoggedIn ? critical : 0}
+			value={isLoggedIn ? stats.criticalFindings : 0}
 			sub="across all repos"
 			tone="soc-risk-critical"
 		/>
 		<StatCard
 			label="High Risk Deps"
-			value={isLoggedIn ? highRiskDeps : 0}
+			value={isLoggedIn ? stats.highRiskDeps : 0}
 			sub="need attention"
 			tone="soc-risk-high"
 		/>
-		<StatCard label="Scans Today" value={isLoggedIn ? 12 : 0} sub="last: 2m ago" />
+		<StatCard
+			label="Scans Today"
+			value={isLoggedIn ? stats.scansToday : 0}
+			sub={`last: ${isLoggedIn ? stats.lastScanLabel : '-'}`}
+		/>
 	</section>
 
 	<section class="soc-grid-2">
@@ -54,7 +64,7 @@
 												? 'bg-amber-400'
 												: 'bg-emerald-400'
 								}`}
-								style={`width: ${isLoggedIn ? (row.count / findings.length) * 100 : 0}%`}
+								style={`width: ${isLoggedIn && totalFindings > 0 ? (row.count / totalFindings) * 100 : 0}%`}
 							></div>
 						</div>
 						<p class="w-5 text-right text-xs">{isLoggedIn ? row.count : 0}</p>
@@ -67,7 +77,7 @@
 			<div class="soc-section-head"><p class="soc-section-label">Policy Status</p></div>
 			{#if isLoggedIn}
 				<div class="space-y-2 p-3">
-					{#each repos as repo}
+					{#each policyStatus as repo}
 						<div class="flex items-center gap-2 text-xs">
 							<p class="flex-1">{repo.name}</p>
 							<RiskScore value={repo.risk} />
@@ -99,7 +109,7 @@
 			</thead>
 			<tbody>
 				{#if isLoggedIn}
-					{#each scans.slice(0, 5) as scan}
+					{#each recentScans as scan}
 						<tr>
 							<td class="text-[10px] text-primary">{scan.id}</td>
 							<td>{scan.repo}</td>
