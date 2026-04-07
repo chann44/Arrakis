@@ -12,17 +12,26 @@ export const GET: RequestHandler = async ({ cookies, fetch, url }) => {
 
 	const params = new URLSearchParams();
 	const service = (url.searchParams.get('service') ?? '').trim();
+	const container = (url.searchParams.get('container') ?? '').trim();
 	const level = (url.searchParams.get('level') ?? '').trim();
 	const cursor = (url.searchParams.get('cursor') ?? '').trim();
+	const source = (url.searchParams.get('source') ?? '').trim();
 	if (service) params.set('service', service);
+	if (container) params.set('container', container);
 	if (level) params.set('level', level);
 	if (cursor) params.set('cursor', cursor);
+	if (source) params.set('source', source);
 
-	const response = await fetch(`${API_BASE_URL}/v1/system-health/logs/stream?${params.toString()}`, {
-		headers: {
-			Authorization: `Bearer ${session}`
-		}
-	});
+	let response: Response;
+	try {
+		response = await fetch(`${API_BASE_URL}/v1/system-health/logs/stream?${params.toString()}`, {
+			headers: {
+				Authorization: `Bearer ${session}`
+			}
+		});
+	} catch {
+		return new Response('logs upstream unavailable', { status: 503 });
+	}
 
 	if (response.status === 401) {
 		throw redirect(302, '/auth');

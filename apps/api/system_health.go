@@ -10,11 +10,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chann44/TGE/adapters"
 	db "github.com/chann44/TGE/internals/db"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const appVersion = "v0.1.0"
+
+const (
+	logSourceAuto    = "auto"
+	logSourceService = "service"
+	logSourceDocker  = "docker"
+)
 
 type serviceDescriptor struct {
 	Key  string `json:"key"`
@@ -107,14 +114,82 @@ func (h *Handler) systemHealthQueues(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) systemHealthLogs(w http.ResponseWriter, r *http.Request) {
 	service := strings.TrimSpace(r.URL.Query().Get("service"))
+	container := strings.TrimSpace(r.URL.Query().Get("container"))
 	level := normalizeLogLevel(strings.TrimSpace(r.URL.Query().Get("level")))
 	cursor := parseInt64Default(r.URL.Query().Get("cursor"), 0)
+	source := normalizeLogSource(r.URL.Query().Get("source"), h.dockerLogs != nil)
 	limit := queryInt(r.URL.Query().Get("limit"), 50)
 	if limit > 200 {
 		limit = 200
 	}
+
+	if source == logSourceDocker {
+		if h.dockerLogs == nil {
+			http.Error(w, "docker logs unavailable", http.StatusServiceUnavailable)
+			return
+		}
+
+		containers, err := h.dockerLogs.ListContainers(r.Context(), true)
+		if err != nil {
+			http.Error(w, "failed to fetch containers", http.StatusInternalServerError)
+			return
+		}
+		containers = filterDockerContainers(containers, service, container)
+
+		rows, err := h.dockerLogs.RecentLogs(r.Context(), containers, max(20, limit))
+		if err != nil {
+			http.Error(w, "failed to fetch container logs", http.StatusInternalServerError)
+			return
+		}
+
+		items := make([]map[string]any, 0, limit)
+		nextCursor := int64(0)
+		for _, row := range rows {
+			if cursor > 0 && row.Cursor >= cursor {
+				continue
+			}
+			if level != "" && row.Level != level {
+				continue
+			}
+			items = append(items, map[string]any{
+				"id":         row.Cursor,
+				"service":    row.Service,
+				"container":  row.Container,
+				"stream":     row.Stream,
+				"level":      row.Level,
+				"message":    row.Message,
+				"metadata":   map[string]any{},
+				"source":     logSourceDocker,
+				"created_at": row.CreatedAt.UTC().Format(time.RFC3339),
+			})
+			nextCursor = row.Cursor
+			if len(items) >= limit {
+				break
+			}
+		}
+
+		if len(items) < limit {
+			nextCursor = 0
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"items":       items,
+			"next_cursor": nextCursor,
+			"source":      logSourceDocker,
+		})
+		return
+	}
+
+	if source == logSourceAuto && h.dockerLogs != nil {
+		source = logSourceDocker
+	}
+	if source == logSourceDocker {
+		http.Error(w, "docker logs unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
 	if h.clickhouse == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}, "next_cursor": 0})
+		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}, "next_cursor": 0, "source": logSourceService})
 		return
 	}
 
@@ -134,9 +209,12 @@ func (h *Handler) systemHealthLogs(w http.ResponseWriter, r *http.Request) {
 		items = append(items, map[string]any{
 			"id":         row.Cursor,
 			"service":    row.Service,
+			"container":  row.Service,
+			"stream":     "stdout",
 			"level":      row.Level,
 			"message":    row.Message,
 			"metadata":   metadata,
+			"source":     logSourceService,
 			"created_at": row.Timestamp.UTC().Format(time.RFC3339),
 		})
 		nextCursor = row.Cursor
@@ -149,10 +227,70 @@ func (h *Handler) systemHealthLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items":       items,
 		"next_cursor": nextCursor,
+		"source":      logSourceService,
 	})
 }
 
 func (h *Handler) systemHealthLogServices(w http.ResponseWriter, r *http.Request) {
+	source := normalizeLogSource(r.URL.Query().Get("source"), h.dockerLogs != nil)
+	if source == logSourceDocker {
+		if h.dockerLogs == nil {
+			http.Error(w, "docker logs unavailable", http.StatusServiceUnavailable)
+			return
+		}
+
+		containers, err := h.dockerLogs.ListContainers(r.Context(), true)
+		if err != nil {
+			http.Error(w, "failed to fetch containers", http.StatusInternalServerError)
+			return
+		}
+
+		serviceByKey := map[string]string{}
+		containerItems := make([]map[string]any, 0, len(containers))
+		for _, container := range containers {
+			key := strings.TrimSpace(container.Service)
+			if key == "" {
+				key = strings.TrimSpace(container.Name)
+			}
+			if key == "" {
+				continue
+			}
+			if _, exists := serviceByKey[key]; !exists {
+				serviceByKey[key] = humanizeServiceKey(key)
+			}
+			containerItems = append(containerItems, map[string]any{
+				"id":      container.ID,
+				"name":    container.Name,
+				"service": key,
+				"state":   container.State,
+				"status":  container.Status,
+			})
+		}
+
+		services := make([]serviceDescriptor, 0, len(serviceByKey))
+		for key, name := range serviceByKey {
+			services = append(services, serviceDescriptor{Key: key, Name: name})
+		}
+		sort.Slice(services, func(i, j int) bool {
+			return services[i].Name < services[j].Name
+		})
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"services":   services,
+			"containers": containerItems,
+			"source":     logSourceDocker,
+		})
+		return
+	}
+
+	if source == logSourceAuto && h.dockerLogs != nil {
+		source = logSourceDocker
+	}
+	if source == logSourceDocker {
+		http.Error(w, "docker logs unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
 	rows := make([]string, 0)
 	if h.clickhouse != nil {
 		values, err := h.clickhouse.ListDistinctLogServices(r.Context())
@@ -183,19 +321,110 @@ func (h *Handler) systemHealthLogServices(w http.ResponseWriter, r *http.Request
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"services": services,
+		"services":   services,
+		"containers": []any{},
+		"source":     logSourceService,
 	})
 }
 
 func (h *Handler) systemHealthLogsStream(w http.ResponseWriter, r *http.Request) {
+	service := strings.TrimSpace(r.URL.Query().Get("service"))
+	container := strings.TrimSpace(r.URL.Query().Get("container"))
+	level := normalizeLogLevel(strings.TrimSpace(r.URL.Query().Get("level")))
+	cursor := parseInt64Default(r.URL.Query().Get("cursor"), 0)
+	source := normalizeLogSource(r.URL.Query().Get("source"), h.dockerLogs != nil)
+
+	if source == logSourceDocker {
+		if h.dockerLogs == nil {
+			http.Error(w, "docker logs unavailable", http.StatusServiceUnavailable)
+			return
+		}
+
+		containers, err := h.dockerLogs.ListContainers(r.Context(), true)
+		if err != nil {
+			http.Error(w, "failed to fetch containers", http.StatusInternalServerError)
+			return
+		}
+		containers = filterDockerContainers(containers, service, container)
+		if len(containers) == 0 {
+			http.Error(w, "no containers matched filter", http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		_, _ = fmt.Fprint(w, ": connected\n\n")
+		flusher.Flush()
+
+		heartbeatTicker := time.NewTicker(15 * time.Second)
+		defer heartbeatTicker.Stop()
+
+		since := time.Now().Add(-5 * time.Second)
+		if cursor > 0 {
+			since = time.Unix(0, cursor)
+		}
+
+		streamErr := make(chan error, 1)
+		go func() {
+			streamErr <- h.dockerLogs.StreamLogs(r.Context(), containers, since, func(entry adapters.DockerLogEntry) {
+				if level != "" && entry.Level != level {
+					return
+				}
+				payload, _ := json.Marshal(map[string]any{
+					"id":         entry.Cursor,
+					"service":    entry.Service,
+					"container":  entry.Container,
+					"stream":     entry.Stream,
+					"level":      entry.Level,
+					"message":    entry.Message,
+					"metadata":   map[string]any{},
+					"source":     logSourceDocker,
+					"created_at": entry.CreatedAt.UTC().Format(time.RFC3339),
+				})
+				_, _ = fmt.Fprintf(w, "event: log\ndata: %s\n\n", payload)
+				flusher.Flush()
+			})
+		}()
+
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-heartbeatTicker.C:
+				_, _ = fmt.Fprintf(w, ": heartbeat %d\n\n", time.Now().Unix())
+				flusher.Flush()
+			case err := <-streamErr:
+				if err != nil {
+					_, _ = fmt.Fprint(w, "event: error\ndata: {\"message\":\"failed to read logs\"}\n\n")
+					flusher.Flush()
+				}
+				return
+			}
+		}
+	}
+
+	if source == logSourceAuto && h.dockerLogs != nil {
+		source = logSourceDocker
+	}
+	if source == logSourceDocker {
+		http.Error(w, "docker logs unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
 	if h.clickhouse == nil {
 		http.Error(w, "log streaming unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
-	service := strings.TrimSpace(r.URL.Query().Get("service"))
-	level := normalizeLogLevel(strings.TrimSpace(r.URL.Query().Get("level")))
-	cursor := parseInt64Default(r.URL.Query().Get("cursor"), 0)
 	if cursor == 0 {
 		cursor = time.Now().Add(-5 * time.Second).UnixNano()
 	}
@@ -242,9 +471,12 @@ func (h *Handler) systemHealthLogsStream(w http.ResponseWriter, r *http.Request)
 				payload, _ := json.Marshal(map[string]any{
 					"id":         row.Cursor,
 					"service":    row.Service,
+					"container":  row.Service,
+					"stream":     "stdout",
 					"level":      row.Level,
 					"message":    row.Message,
 					"metadata":   metadata,
+					"source":     logSourceService,
 					"created_at": row.Timestamp.UTC().Format(time.RFC3339),
 				})
 				_, _ = fmt.Fprintf(w, "event: log\ndata: %s\n\n", payload)
@@ -253,6 +485,25 @@ func (h *Handler) systemHealthLogsStream(w http.ResponseWriter, r *http.Request)
 			flusher.Flush()
 		}
 	}
+}
+
+func filterDockerContainers(containers []adapters.DockerContainer, service, container string) []adapters.DockerContainer {
+	service = strings.TrimSpace(strings.ToLower(service))
+	container = strings.TrimSpace(strings.ToLower(container))
+	if service == "" && container == "" {
+		return containers
+	}
+	out := make([]adapters.DockerContainer, 0, len(containers))
+	for _, item := range containers {
+		if service != "" && strings.ToLower(strings.TrimSpace(item.Service)) != service {
+			continue
+		}
+		if container != "" && strings.ToLower(strings.TrimSpace(item.Name)) != container {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func (h *Handler) collectServiceStatuses(ctx context.Context) []serviceStatus {
@@ -376,6 +627,19 @@ func (h *Handler) writeServiceLog(ctx context.Context, service, level, message s
 		return
 	}
 	h.logger.Log(ctx, service, nonEmpty(normalizeLogLevel(level), "info"), message, metadata)
+}
+
+func normalizeLogSource(raw string, dockerAvailable bool) string {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	switch v {
+	case logSourceService, logSourceDocker:
+		return v
+	default:
+		if dockerAvailable {
+			return logSourceAuto
+		}
+		return logSourceService
+	}
 }
 
 func normalizeLogLevel(level string) string {

@@ -99,6 +99,10 @@ services:
       CLICKHOUSE_PORT: "9000"
       DOMAIN_ROUTER_SYNC_ENABLED: "true"
       TRAEFIK_DYNAMIC_CONFIG_PATH: /etc/traefik/dynamic/custom-domains.yml
+      DOCKER_LOGS_ENABLED: "true"
+      DOCKER_LOGS_SOCKET_PATH: /var/run/docker.sock
+      DOCKER_LOGS_INCLUDE_ALL: "false"
+      DOCKER_LOGS_NETWORK: tge_net
     command: ["/usr/local/bin/api"]
     depends_on:
       migrate:
@@ -122,6 +126,7 @@ services:
       - traefik.http.services.tge-api-setup.loadbalancer.server.port=8080
     volumes:
       - traefik_dynamic:/etc/traefik/dynamic
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - tge_net
 
@@ -189,4 +194,5 @@ volumes:
 
 networks:
   tge_net:
+    name: tge_net
     driver: bridge

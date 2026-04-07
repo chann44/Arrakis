@@ -7,9 +7,13 @@
 	const summary = $derived(data.summary ?? {});
 	const services = $derived(data.services ?? []);
 	const queues = $derived(data.queues ?? []);
+	const logServices = $derived(data.logServices ?? []);
+	const logContainers = $derived(data.logContainers ?? []);
 	const logs = $derived(data.logs ?? []);
 	const nextCursor = $derived(data.nextCursor ?? 0);
 	const filters = $derived(data.filters ?? { service: '', level: '' });
+	const logsTab = $derived((data.logsTab ?? 'service') as 'service' | 'docker');
+	const isDockerTab = $derived(logsTab === 'docker');
 
 	let liveLogs = $state<any[]>([]);
 	let streamStatus = $state<'connecting' | 'live' | 'reconnecting' | 'offline'>('connecting');
@@ -26,6 +30,12 @@
 		}
 		if ((filters.level ?? '').trim()) {
 			params.set('level', filters.level.trim());
+		}
+		if ((filters.container ?? '').trim()) {
+			params.set('container', filters.container.trim());
+		}
+		if ((filters.source ?? '').trim()) {
+			params.set('source', filters.source.trim());
 		}
 		if (newestCursor > 0) {
 			params.set('cursor', String(newestCursor));
@@ -162,14 +172,45 @@
 
 	<section class="soc-section">
 		<div class="soc-section-head">
-			<p class="soc-section-label">Service Logs</p>
+			<p class="soc-section-label">Logs</p>
 			<span class="soc-subtle px-3 text-[11px]">Live: {streamStatus}</span>
 		</div>
+		<div class="flex gap-2 border-b border-border px-3 pt-3">
+			<a
+				class={`soc-btn ${logsTab === 'service' ? '' : 'soc-btn-ghost'}`}
+				href={`?logs_tab=service&service=${encodeURIComponent(filters.service ?? '')}&level=${encodeURIComponent(filters.level ?? '')}`}
+			>
+				Our Services Logs
+			</a>
+			<a
+				class={`soc-btn ${logsTab === 'docker' ? '' : 'soc-btn-ghost'}`}
+				href={`?logs_tab=docker&service=${encodeURIComponent(filters.service ?? '')}&container=${encodeURIComponent(filters.container ?? '')}&level=${encodeURIComponent(filters.level ?? '')}`}
+			>
+				Docker Logs
+			</a>
+		</div>
 		<form method="GET" class="flex flex-wrap items-end gap-2 border-b border-border p-3 text-xs">
+			<input type="hidden" name="logs_tab" value={logsTab} />
 			<label class="flex items-center gap-2">
 				<span class="soc-subtle">Service</span>
-				<input class="soc-input h-8 w-40" name="service" value={filters.service ?? ''} placeholder="api" />
+				<select class="soc-input h-8 w-44" name="service" value={filters.service ?? ''}>
+					<option value="">all</option>
+					{#each logServices as option}
+						<option value={option.key}>{option.name}</option>
+					{/each}
+				</select>
 			</label>
+			{#if isDockerTab}
+				<label class="flex items-center gap-2">
+					<span class="soc-subtle">Container</span>
+					<select class="soc-input h-8 w-52" name="container" value={filters.container ?? ''}>
+						<option value="">all</option>
+						{#each logContainers as option}
+							<option value={option.name}>{option.name}</option>
+						{/each}
+					</select>
+				</label>
+			{/if}
 			<label class="flex items-center gap-2">
 				<span class="soc-subtle">Level</span>
 				<select class="soc-input h-8 w-32" name="level" value={filters.level ?? ''}>
@@ -188,6 +229,10 @@
 					<tr>
 						<th>Time</th>
 						<th>Service</th>
+						{#if isDockerTab}
+							<th>Container</th>
+							<th>Stream</th>
+						{/if}
 						<th>Level</th>
 						<th>Message</th>
 					</tr>
@@ -195,13 +240,17 @@
 				<tbody>
 					{#if liveLogs.length === 0}
 						<tr>
-							<td colspan="4" class="soc-subtle">No logs found for this filter.</td>
+							<td colspan={isDockerTab ? 6 : 4} class="soc-subtle">No logs found for this filter.</td>
 						</tr>
 					{:else}
 						{#each liveLogs as log}
 							<tr>
 								<td class="soc-subtle whitespace-nowrap">{log.created_at}</td>
 								<td class="text-primary">{log.service}</td>
+								{#if isDockerTab}
+									<td class="soc-subtle whitespace-nowrap">{log.container ?? '-'}</td>
+									<td class="soc-subtle whitespace-nowrap">{log.stream ?? '-'}</td>
+								{/if}
 								<td class={levelClass(log.level)}>{log.level}</td>
 								<td>{log.message}</td>
 							</tr>
@@ -214,7 +263,7 @@
 			<div class="border-t border-border p-3 text-xs">
 				<a
 					class="soc-btn"
-					href={`?service=${encodeURIComponent(filters.service ?? '')}&level=${encodeURIComponent(filters.level ?? '')}&cursor=${nextCursor}`}
+					href={`?logs_tab=${encodeURIComponent(logsTab)}&service=${encodeURIComponent(filters.service ?? '')}&container=${encodeURIComponent(filters.container ?? '')}&level=${encodeURIComponent(filters.level ?? '')}&cursor=${nextCursor}`}
 				>
 					Load More Logs
 				</a>

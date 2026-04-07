@@ -52,6 +52,15 @@ func main() {
 	centralLogger := adapters.NewCentralLogger(clickhouseClient, "api")
 	centralLogger.Log(ctx, "api", "info", "api process started", map[string]any{"port": port})
 
+	var dockerLogs *adapters.DockerLogs
+	if cfg.DockerLogsEnabled {
+		dockerLogs = adapters.NewDockerLogs(cfg.DockerLogsSocketPath, cfg.DockerLogsNetwork, cfg.DockerLogsIncludeAll)
+		if err := dockerLogs.Ping(ctx); err != nil {
+			log.Printf("api: docker logs unavailable, system health logs degraded: %v", err)
+			dockerLogs = nil
+		}
+	}
+
 	asynqClient := asynq.NewClient(asynq.RedisClientOpt{Addr: redisAddr})
 	defer func() {
 		if err := asynqClient.Close(); err != nil {
@@ -59,7 +68,7 @@ func main() {
 		}
 	}()
 
-	handler := NewHandler(cfg, redisClient, clickhouseClient, centralLogger, postgresPool, queries, asynqClient)
+	handler := NewHandler(cfg, redisClient, clickhouseClient, dockerLogs, centralLogger, postgresPool, queries, asynqClient)
 	if err := handler.syncTraefikDynamicDomains(ctx); err != nil {
 		log.Printf("api: failed to sync traefik dynamic config: %v", err)
 	}

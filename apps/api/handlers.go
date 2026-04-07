@@ -39,6 +39,7 @@ type Handler struct {
 	cfg         *internal.Config
 	redis       *adapters.Redis
 	clickhouse  *adapters.ClickHouse
+	dockerLogs  *adapters.DockerLogs
 	logger      *adapters.CentralLogger
 	postgres    *pgxpool.Pool
 	queries     *db.Queries
@@ -102,8 +103,8 @@ type dependencyFilesResponse struct {
 	Files        []dependencyFileResponse `json:"files"`
 }
 
-func NewHandler(cfg *internal.Config, redisClient *adapters.Redis, clickhouseClient *adapters.ClickHouse, logger *adapters.CentralLogger, postgresPool *pgxpool.Pool, queries *db.Queries, asynqClient *asynq.Client) *Handler {
-	return &Handler{cfg: cfg, redis: redisClient, clickhouse: clickhouseClient, logger: logger, postgres: postgresPool, queries: queries, asynqClient: asynqClient}
+func NewHandler(cfg *internal.Config, redisClient *adapters.Redis, clickhouseClient *adapters.ClickHouse, dockerLogs *adapters.DockerLogs, logger *adapters.CentralLogger, postgresPool *pgxpool.Pool, queries *db.Queries, asynqClient *asynq.Client) *Handler {
+	return &Handler{cfg: cfg, redis: redisClient, clickhouse: clickhouseClient, dockerLogs: dockerLogs, logger: logger, postgres: postgresPool, queries: queries, asynqClient: asynqClient}
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

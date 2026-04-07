@@ -37,6 +37,10 @@ type Config struct {
 	GHSAAPIToken            string
 	NVDAPIKey               string
 	SupplyChainEnabled      bool
+	DockerLogsEnabled       bool
+	DockerLogsSocketPath    string
+	DockerLogsIncludeAll    bool
+	DockerLogsNetwork       string
 }
 
 var cfg *Config
@@ -78,6 +82,10 @@ func GetConfig() *Config {
 			GHSAAPIToken:            os.Getenv("GHSA_API_TOKEN"),
 			NVDAPIKey:               os.Getenv("NVD_API_KEY"),
 			SupplyChainEnabled:      parseEnvBoolDefaultFalse("SUPPLY_CHAIN_ENABLED"),
+			DockerLogsEnabled:       parseEnvBoolDefaultFalse("DOCKER_LOGS_ENABLED"),
+			DockerLogsSocketPath:    os.Getenv("DOCKER_LOGS_SOCKET_PATH"),
+			DockerLogsIncludeAll:    parseEnvBoolDefaultFalse("DOCKER_LOGS_INCLUDE_ALL"),
+			DockerLogsNetwork:       os.Getenv("DOCKER_LOGS_NETWORK"),
 		}
 
 		if cfg.FrontendURL == "" {
@@ -103,6 +111,9 @@ func GetConfig() *Config {
 		}
 		if cfg.DomainTXTNamePrefix == "" {
 			cfg.DomainTXTNamePrefix = "_tge-challenge"
+		}
+		if cfg.DockerLogsSocketPath == "" {
+			cfg.DockerLogsSocketPath = "/var/run/docker.sock"
 		}
 	}
 	return cfg
