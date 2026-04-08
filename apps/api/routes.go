@@ -30,6 +30,7 @@ func registerRoutes(r chi.Router, h *Handler) {
 			r.Get("/integrations/activities", h.listIntegrationActivities)
 			r.Get("/integrations/{provider}", h.getIntegration)
 			r.Put("/integrations/{provider}/connect", h.connectIntegration)
+			r.Post("/integrations/linear/teams", h.listLinearTeams)
 			r.Post("/integrations/{provider}/messages", h.sendIntegrationMessage)
 			r.Post("/integrations/{provider}/issues", h.createIntegrationIssue)
 			r.Get("/policies", h.listPolicies)

@@ -40,6 +40,12 @@ type GitHubRepository = {
 	connected: boolean;
 };
 
+type LinearTeam = {
+	id: string;
+	key: string;
+	name: string;
+};
+
 export const load: PageServerLoad = async ({ cookies, params, fetch }) => {
 	const session = cookies.get('session');
 	if (!session) {
@@ -100,6 +106,76 @@ export const load: PageServerLoad = async ({ cookies, params, fetch }) => {
 };
 
 export const actions: Actions = {
+	fetchLinearTeams: async ({ cookies, fetch, request, params }) => {
+		const session = cookies.get('session');
+		if (!session) {
+			throw redirect(302, '/auth');
+		}
+
+		const provider = params.provider.toLowerCase().trim();
+		if (provider !== 'linear') {
+			return fail(400, {
+				action: 'fetchLinearTeams',
+				message: 'Team lookup is only supported for Linear.'
+			});
+		}
+
+		const formData = await request.formData();
+		const linearToken = String(formData.get('linear_api_token') ?? '').trim();
+		if (!linearToken) {
+			return fail(400, {
+				action: 'fetchLinearTeams',
+				message: 'Linear API token is required.',
+				linear_api_token: '',
+				linear_team_id: ''
+			});
+		}
+
+		const response = await fetch(`${API_BASE_URL}/v1/integrations/linear/teams`, {
+			method: 'POST',
+			headers: {
+				Authorization: `Bearer ${session}`,
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({ linear_api_token: linearToken })
+		});
+
+		if (response.status === 401) {
+			throw redirect(302, '/auth');
+		}
+
+		if (!response.ok) {
+			return fail(response.status, {
+				action: 'fetchLinearTeams',
+				message: await response.text(),
+				linear_api_token: linearToken,
+				linear_team_id: ''
+			});
+		}
+
+		const payload = (await response.json()) as { teams?: LinearTeam[] };
+		const teams = payload.teams ?? [];
+		const firstTeamID = String(teams[0]?.id ?? '').trim();
+
+		if (!firstTeamID) {
+			return fail(400, {
+				action: 'fetchLinearTeams',
+				message: 'No teams found for this token.',
+				linear_api_token: linearToken,
+				linear_team_id: ''
+			});
+		}
+
+		return {
+			action: 'fetchLinearTeams',
+			success: true,
+			message: `Found ${teams.length} team(s).`,
+			linear_api_token: linearToken,
+			linear_team_id: firstTeamID,
+			linear_teams: teams
+		};
+	},
+
 	connect: async ({ cookies, fetch, request, params }) => {
 		const session = cookies.get('session');
 		if (!session) {
@@ -134,10 +210,26 @@ export const actions: Actions = {
 			throw redirect(302, '/auth');
 		}
 		if (!response.ok) {
-			return fail(response.status, { action: 'connect', message: await response.text() });
+			return fail(response.status, {
+				action: 'connect',
+				message: await response.text(),
+				linear_api_token: payload.linear_api_token,
+				linear_team_id: payload.linear_team_id
+			});
 		}
 
-		return { action: 'connect', success: true, message: 'Integration connected.' };
+		const integrationPayload = (await response.json()) as {
+			integration?: { config?: { team_id?: string } };
+		};
+		const connectedTeamID = String(integrationPayload.integration?.config?.team_id ?? '').trim();
+
+		return {
+			action: 'connect',
+			success: true,
+			message: 'Integration connected.',
+			linear_api_token: payload.linear_api_token,
+			linear_team_id: payload.linear_team_id || connectedTeamID
+		};
 	},
 
 	runTest: async ({ cookies, fetch, request, params }) => {
@@ -173,8 +265,19 @@ export const actions: Actions = {
 			throw redirect(302, '/auth');
 		}
 		if (!connectResponse.ok) {
-			return fail(connectResponse.status, { action: 'runTest', message: await connectResponse.text() });
+			return fail(connectResponse.status, {
+				action: 'runTest',
+				message: await connectResponse.text(),
+				linear_api_token: connectPayload.linear_api_token,
+				linear_team_id: connectPayload.linear_team_id
+			});
 		}
+
+		const connectResult = (await connectResponse.json()) as {
+			integration?: { config?: { team_id?: string } };
+		};
+		const effectiveTeamID =
+			connectPayload.linear_team_id || String(connectResult.integration?.config?.team_id ?? '').trim();
 
 		let response: Response;
 		if (provider === 'slack' || provider === 'discord') {
@@ -241,9 +344,20 @@ export const actions: Actions = {
 			throw redirect(302, '/auth');
 		}
 		if (!response.ok) {
-			return fail(response.status, { action: 'runTest', message: await response.text() });
+			return fail(response.status, {
+				action: 'runTest',
+				message: await response.text(),
+				linear_api_token: connectPayload.linear_api_token,
+				linear_team_id: effectiveTeamID
+			});
 		}
 
-		return { action: 'runTest', success: true, message: 'Integration test sent successfully.' };
+		return {
+			action: 'runTest',
+			success: true,
+			message: 'Integration test sent successfully.',
+			linear_api_token: connectPayload.linear_api_token,
+			linear_team_id: effectiveTeamID
+		};
 	}
 };

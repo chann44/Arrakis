@@ -31,6 +31,12 @@ type LinearIssue struct {
 	Title      string `json:"title"`
 }
 
+type LinearTeam struct {
+	ID   string `json:"id"`
+	Key  string `json:"key"`
+	Name string `json:"name"`
+}
+
 func SendSlackWebhookMessage(ctx context.Context, webhookURL, text string) error {
 	payload := map[string]string{"text": text}
 	return postIntegrationJSON(ctx, webhookURL, "", payload, http.StatusOK, http.StatusNoContent)
@@ -144,6 +150,46 @@ func CreateLinearIssue(ctx context.Context, apiToken, teamID, title, description
 	return &response.Data.IssueCreate.Issue, nil
 }
 
+func ListLinearTeams(ctx context.Context, apiToken string) ([]LinearTeam, error) {
+	reqURL := "https://api.linear.app/graphql"
+	payload := map[string]any{
+		"query": `query Teams { teams { nodes { id key name } } }`,
+	}
+
+	var response struct {
+		Data struct {
+			Teams struct {
+				Nodes []LinearTeam `json:"nodes"`
+			} `json:"teams"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+
+	if err := postIntegrationJSONDecode(ctx, reqURL, strings.TrimSpace(apiToken), payload, &response, http.StatusOK); err != nil {
+		return nil, err
+	}
+	if len(response.Errors) > 0 {
+		return nil, fmt.Errorf("linear teams query failed: %s", strings.TrimSpace(response.Errors[0].Message))
+	}
+
+	teams := make([]LinearTeam, 0, len(response.Data.Teams.Nodes))
+	for _, team := range response.Data.Teams.Nodes {
+		id := strings.TrimSpace(team.ID)
+		if id == "" {
+			continue
+		}
+		teams = append(teams, LinearTeam{
+			ID:   id,
+			Key:  strings.TrimSpace(team.Key),
+			Name: strings.TrimSpace(team.Name),
+		})
+	}
+
+	return teams, nil
+}
+
 func postIntegrationJSON(ctx context.Context, endpoint, authHeader string, payload any, expectedStatus ...int) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -156,6 +202,8 @@ func postIntegrationJSON(ctx context.Context, endpoint, authHeader string, paylo
 	req.Header.Set("Content-Type", "application/json")
 	if strings.TrimSpace(authHeader) != "" {
 		if strings.HasPrefix(authHeader, "Bearer ") || strings.HasPrefix(authHeader, "Basic ") {
+			req.Header.Set("Authorization", authHeader)
+		} else if strings.Contains(endpoint, "api.linear.app") {
 			req.Header.Set("Authorization", authHeader)
 		} else {
 			req.Header.Set("Authorization", "Bearer "+authHeader)
@@ -193,6 +241,8 @@ func postIntegrationJSONDecode(ctx context.Context, endpoint, authHeader string,
 	req.Header.Set("Content-Type", "application/json")
 	if strings.TrimSpace(authHeader) != "" {
 		if strings.HasPrefix(authHeader, "Bearer ") || strings.HasPrefix(authHeader, "Basic ") {
+			req.Header.Set("Authorization", authHeader)
+		} else if strings.Contains(endpoint, "api.linear.app") {
 			req.Header.Set("Authorization", authHeader)
 		} else {
 			req.Header.Set("Authorization", "Bearer "+authHeader)

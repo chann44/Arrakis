@@ -51,6 +51,16 @@ type createIntegrationIssueRequest struct {
 	ProjectKey  string   `json:"project_key"`
 }
 
+type linearTeamResponse struct {
+	ID   string `json:"id"`
+	Key  string `json:"key"`
+	Name string `json:"name"`
+}
+
+type listLinearTeamsRequest struct {
+	LinearToken string `json:"linear_api_token"`
+}
+
 type integrationResponse struct {
 	Provider    string         `json:"provider"`
 	Name        string         `json:"name"`
@@ -147,7 +157,7 @@ func (h *Handler) connectIntegration(w http.ResponseWriter, r *http.Request) {
 		existingConfig = decodeIntegrationConfig(existing.Config)
 	}
 
-	config, err := integrationConfigFromConnectRequest(provider, req, existingConfig)
+	config, err := integrationConfigFromConnectRequest(r.Context(), provider, req, existingConfig)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -186,6 +196,47 @@ func (h *Handler) connectIntegration(w http.ResponseWriter, r *http.Request) {
 	h.logIntegrationActivity(r.Context(), userID, pgtype.Int8{Int64: row.ID, Valid: true}, provider, "connected", "success", "integration connected", map[string]any{})
 
 	writeJSON(w, http.StatusOK, map[string]any{"integration": mapIntegrationRow(row)})
+}
+
+func (h *Handler) listLinearTeams(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req listLinearTeamsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	apiToken := strings.TrimSpace(req.LinearToken)
+	if apiToken == "" {
+		http.Error(w, "linear_api_token is required", http.StatusBadRequest)
+		return
+	}
+
+	teams, err := adapters.ListLinearTeams(r.Context(), apiToken)
+	if err != nil {
+		h.requestLog(r, "linear team fetch failed user_id=%d error=%v", userID, err)
+		http.Error(w, "failed to fetch linear teams", http.StatusBadGateway)
+		return
+	}
+
+	result := make([]linearTeamResponse, 0, len(teams))
+	for _, team := range teams {
+		if strings.TrimSpace(team.ID) == "" {
+			continue
+		}
+		result = append(result, linearTeamResponse{
+			ID:   strings.TrimSpace(team.ID),
+			Key:  strings.TrimSpace(team.Key),
+			Name: strings.TrimSpace(team.Name),
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"teams": result})
 }
 
 func (h *Handler) sendIntegrationMessage(w http.ResponseWriter, r *http.Request) {
@@ -486,7 +537,7 @@ func integrationProviderFromPath(w http.ResponseWriter, r *http.Request) (string
 	return provider, true
 }
 
-func integrationConfigFromConnectRequest(provider string, req connectIntegrationRequest, existing map[string]any) (map[string]any, error) {
+func integrationConfigFromConnectRequest(ctx context.Context, provider string, req connectIntegrationRequest, existing map[string]any) (map[string]any, error) {
 	config := map[string]any{}
 	switch provider {
 	case "github":
@@ -528,7 +579,14 @@ func integrationConfigFromConnectRequest(provider string, req connectIntegration
 			return nil, fmt.Errorf("linear_api_token is required")
 		}
 		if teamID == "" {
-			return nil, fmt.Errorf("linear_team_id is required")
+			teams, err := adapters.ListLinearTeams(ctx, apiToken)
+			if err != nil {
+				return nil, fmt.Errorf("linear_team_id is required or fetch failed: %w", err)
+			}
+			if len(teams) == 0 || strings.TrimSpace(teams[0].ID) == "" {
+				return nil, fmt.Errorf("linear_team_id is required and no teams were found for this token")
+			}
+			teamID = strings.TrimSpace(teams[0].ID)
 		}
 		config["api_token"] = apiToken
 		config["team_id"] = teamID

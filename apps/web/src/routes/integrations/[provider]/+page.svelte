@@ -28,9 +28,16 @@
 	const integration = $derived(data.integration);
 	const activities = $derived((data.activities ?? []) as any[]);
 	const repositories = $derived((data.repositories ?? []) as any[]);
+	const linearTeams = $derived((form?.linear_teams ?? []) as Array<{ id: string; key: string; name: string }>);
+	const linearTokenValue = $derived(
+		String(form?.linear_api_token ?? integration.config?.api_token ?? '').trim()
+	);
+	const linearTeamValue = $derived(
+		String(form?.linear_team_id ?? integration.config?.team_id ?? '').trim()
+	);
 
 	const requiredFields = $derived.by(() => {
-		switch (integration.provider) {
+			switch (integration.provider) {
 			case 'slack':
 				return ['webhook_url'];
 			case 'discord':
@@ -38,7 +45,7 @@
 			case 'jira':
 				return ['jira_base_url', 'jira_email', 'jira_api_token', 'jira_project_key'];
 			case 'linear':
-				return ['linear_api_token', 'linear_team_id'];
+				return ['linear_api_token'];
 			case 'github':
 				return ['github app installation', 'at least one connected repository'];
 			default:
@@ -148,7 +155,12 @@
 			{#if integration.provider === 'linear'}
 				<label>
 					<p class="soc-subtle mb-1">Linear API Token</p>
-					<input class="soc-input" name="linear_api_token" placeholder="Paste API token" />
+					<input
+						class="soc-input"
+						name="linear_api_token"
+						placeholder="Paste API token"
+						value={linearTokenValue}
+					/>
 					{#if integration.config?.api_token}
 						<p class="soc-subtle mt-1">
 							Current token: {integration.config.api_token} (masked). Leave blank to keep it.
@@ -161,8 +173,16 @@
 						class="soc-input"
 						name="linear_team_id"
 						placeholder="team_xxx"
-						value={integration.config?.team_id ?? ''}
+						value={linearTeamValue}
 					/>
+					{#if linearTeams.length > 0}
+						<p class="soc-subtle mt-1">
+							Available teams:
+							{#each linearTeams as team, idx}
+								{#if idx > 0}, {/if}{team.name || team.key || team.id} ({team.id})
+							{/each}
+						</p>
+					{/if}
 				</label>
 			{/if}
 
@@ -170,6 +190,9 @@
 				<div class="flex flex-wrap items-center gap-2">
 					<button class="soc-btn-primary" type="submit">Save Integration</button>
 					<button class="soc-btn" type="submit" formaction="?/runTest">Run Test</button>
+					{#if integration.provider === 'linear'}
+						<button class="soc-btn" type="submit" formaction="?/fetchLinearTeams">Fetch Team ID</button>
+					{/if}
 				</div>
 			</div>
 		</form>
