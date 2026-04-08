@@ -1,11 +1,11 @@
 <script lang="ts">
-	let { data }: { data: any } = $props();
+	let { data, form }: { data: any; form: any } = $props();
 
 	const statusClass = (status: string) => {
 		switch (status) {
 			case 'connected':
 				return 'soc-status-ok';
-			case 'needs_attention':
+			case 'error':
 				return 'soc-status-info';
 			default:
 				return 'soc-status-fail';
@@ -16,15 +16,35 @@
 		switch (result) {
 			case 'success':
 				return 'soc-status-ok';
-			case 'retrying':
+			case 'error':
 				return 'soc-status-info';
-			default:
+			case 'failed':
 				return 'soc-status-fail';
+			default:
+				return 'soc-status-info';
 		}
 	};
 
 	const integration = $derived(data.integration);
 	const activities = $derived((data.activities ?? []) as any[]);
+	const repositories = $derived((data.repositories ?? []) as any[]);
+
+	const requiredFields = $derived.by(() => {
+		switch (integration.provider) {
+			case 'slack':
+				return ['webhook_url'];
+			case 'discord':
+				return ['webhook_url'];
+			case 'jira':
+				return ['jira_base_url', 'jira_email', 'jira_api_token', 'jira_project_key'];
+			case 'linear':
+				return ['linear_api_token', 'linear_team_id'];
+			case 'github':
+				return ['github app installation', 'at least one connected repository'];
+			default:
+				return [];
+		}
+	});
 </script>
 
 <div class="soc-page">
@@ -43,59 +63,127 @@
 		</div>
 		<div class="grid gap-2 md:grid-cols-2">
 			<div class="rounded border border-border bg-background px-2 py-1.5">
-				<p class="soc-subtle">Workspace / Project</p>
-				<p>{integration.workspace}</p>
+				<p class="soc-subtle">Provider</p>
+				<p class="uppercase">{integration.provider}</p>
 			</div>
 			<div class="rounded border border-border bg-background px-2 py-1.5">
-				<p class="soc-subtle">Last Successful Sync</p>
-				<p>{integration.lastSync}</p>
+				<p class="soc-subtle">Connected At</p>
+				<p>{integration.connected_at ? new Date(integration.connected_at).toLocaleString() : '-'}</p>
 			</div>
 			<div class="rounded border border-border bg-background px-2 py-1.5">
 				<p class="soc-subtle">Enabled</p>
 				<p>{integration.enabled ? 'yes' : 'no'}</p>
 			</div>
 			<div class="rounded border border-border bg-background px-2 py-1.5">
-				<p class="soc-subtle">Notify on Critical</p>
-				<p>{integration.notifyOnCritical ? 'yes' : 'no'}</p>
-			</div>
-			<div class="rounded border border-border bg-background px-2 py-1.5">
-				<p class="soc-subtle">Notify on Scan Complete</p>
-				<p>{integration.notifyOnScanComplete ? 'yes' : 'no'}</p>
-			</div>
-			<div class="rounded border border-border bg-background px-2 py-1.5">
-				<p class="soc-subtle">Errors (7d)</p>
-				<p>{integration.errors7d}</p>
+				<p class="soc-subtle">Last Error</p>
+				<p>{integration.last_error || '-'}</p>
 			</div>
 		</div>
 	</section>
 
 	<section class="soc-section p-3 text-xs">
-		<p class="mb-2 text-sm font-semibold">Routing and Filters</p>
-		<div class="grid gap-2 md:grid-cols-2">
-			<div class="rounded border border-border bg-background px-2 py-1.5">
-				<p class="soc-subtle">Target Mapping</p>
-				<p>{integration.targetMapping}</p>
-			</div>
-			<div class="rounded border border-border bg-background px-2 py-1.5">
-				<p class="soc-subtle">Repository Filter</p>
-				<p>{integration.repoFilter}</p>
-			</div>
-			<div class="rounded border border-border bg-background px-2 py-1.5">
-				<p class="soc-subtle">Severity Filter</p>
-				<p>{integration.severityFilter}</p>
-			</div>
-			<div class="rounded border border-border bg-background px-2 py-1.5">
-				<p class="soc-subtle">Event Filter</p>
-				<p>{integration.eventFilter}</p>
-			</div>
-		</div>
+		<p class="mb-2 text-sm font-semibold">Connect / Update Integration</p>
+		<p class="soc-subtle mb-2">Required setup:</p>
+		<ul class="mb-3 list-disc space-y-1 pl-4 text-xs">
+			{#each requiredFields as field}
+				<li>{field}</li>
+			{/each}
+		</ul>
+		<form method="POST" action="?/connect" class="grid gap-2 md:grid-cols-2">
+			<label>
+				<p class="soc-subtle mb-1">Display name</p>
+				<input class="soc-input" name="name" value={integration.name} placeholder="Integration name" />
+			</label>
+			<label class="flex items-end gap-2 pb-2">
+				<input type="checkbox" name="enabled" checked={integration.enabled} />
+				<span>Enabled</span>
+			</label>
 
-		<div class="mt-3 flex flex-wrap gap-2">
-			<button class="soc-btn-primary" type="button">Test Integration</button>
-			<button class="soc-btn" type="button">Reconnect</button>
-			<button class="soc-btn" type="button">Disconnect</button>
-		</div>
+			{#if integration.provider === 'slack' || integration.provider === 'discord'}
+				<label class="md:col-span-2">
+					<p class="soc-subtle mb-1">Webhook URL</p>
+					<input
+						class="soc-input"
+						name="webhook_url"
+						placeholder="https://hooks..."
+						value={integration.config?.webhook_url ?? ''}
+					/>
+				</label>
+			{/if}
+
+			{#if integration.provider === 'jira'}
+				<label>
+					<p class="soc-subtle mb-1">Jira Base URL</p>
+					<input
+						class="soc-input"
+						name="jira_base_url"
+						placeholder="https://your-team.atlassian.net"
+						value={integration.config?.base_url ?? ''}
+					/>
+				</label>
+				<label>
+					<p class="soc-subtle mb-1">Jira Email</p>
+					<input class="soc-input" name="jira_email" value={integration.config?.email ?? ''} />
+				</label>
+				<label>
+					<p class="soc-subtle mb-1">Jira API Token</p>
+					<input class="soc-input" name="jira_api_token" placeholder="Paste API token" />
+					{#if integration.config?.api_token}
+						<p class="soc-subtle mt-1">
+							Current token: {integration.config.api_token} (masked). Leave blank to keep it.
+						</p>
+					{/if}
+				</label>
+				<label>
+					<p class="soc-subtle mb-1">Default Project Key</p>
+					<input
+						class="soc-input"
+						name="jira_project_key"
+						placeholder="SEC"
+						value={integration.config?.project_key ?? ''}
+					/>
+				</label>
+			{/if}
+
+			{#if integration.provider === 'linear'}
+				<label>
+					<p class="soc-subtle mb-1">Linear API Token</p>
+					<input class="soc-input" name="linear_api_token" placeholder="Paste API token" />
+					{#if integration.config?.api_token}
+						<p class="soc-subtle mt-1">
+							Current token: {integration.config.api_token} (masked). Leave blank to keep it.
+						</p>
+					{/if}
+				</label>
+				<label>
+					<p class="soc-subtle mb-1">Linear Team ID</p>
+					<input
+						class="soc-input"
+						name="linear_team_id"
+						placeholder="team_xxx"
+						value={integration.config?.team_id ?? ''}
+					/>
+				</label>
+			{/if}
+
+			<div class="md:col-span-2">
+				<div class="flex flex-wrap items-center gap-2">
+					<button class="soc-btn-primary" type="submit">Save Integration</button>
+					<button class="soc-btn" type="submit" formaction="?/runTest">Run Test</button>
+				</div>
+			</div>
+		</form>
 	</section>
+
+	{#if integration.provider === 'github' && repositories.length === 0}
+		<p class="text-xs text-amber-700">
+			GitHub tests require at least one connected repository. Connect a repository in the Repos page first.
+		</p>
+	{/if}
+
+	{#if form?.message}
+		<p class={`text-xs ${form?.success ? 'text-emerald-700' : 'text-rose-700'}`}>{form.message}</p>
+	{/if}
 
 	<section class="soc-section">
 		<div class="soc-section-head">
@@ -105,23 +193,21 @@
 			<thead>
 				<tr>
 					<th>Time</th>
-					<th>Event</th>
-					<th>Target</th>
-					<th>Result</th>
+					<th>Action</th>
+					<th>Status</th>
 					<th>Details</th>
 				</tr>
 			</thead>
 			<tbody>
 				{#if activities.length === 0}
-					<tr><td colspan="5" class="soc-subtle">No activity captured yet.</td></tr>
+					<tr><td colspan="4" class="soc-subtle">No activity captured yet.</td></tr>
 				{:else}
 					{#each activities as activity}
 						<tr>
-							<td class="soc-subtle">{new Date(activity.time).toLocaleString()}</td>
-							<td>{activity.eventType}</td>
-							<td class="text-primary">{activity.target}</td>
-							<td><span class={`soc-badge ${resultClass(activity.result)}`}>{activity.result}</span></td>
-							<td>{activity.details}</td>
+							<td class="soc-subtle">{new Date(activity.created_at).toLocaleString()}</td>
+							<td>{activity.action}</td>
+							<td><span class={`soc-badge ${resultClass(activity.status)}`}>{activity.status}</span></td>
+							<td>{activity.detail}</td>
 						</tr>
 					{/each}
 				{/if}

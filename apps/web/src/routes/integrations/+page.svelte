@@ -10,7 +10,7 @@
 		switch (status) {
 			case 'connected':
 				return 'soc-status-ok';
-			case 'needs_attention':
+			case 'error':
 				return 'soc-status-info';
 			default:
 				return 'soc-status-fail';
@@ -21,10 +21,12 @@
 		switch (result) {
 			case 'success':
 				return 'soc-status-ok';
-			case 'retrying':
+			case 'error':
 				return 'soc-status-info';
-			default:
+			case 'failed':
 				return 'soc-status-fail';
+			default:
+				return 'soc-status-info';
 		}
 	};
 
@@ -38,6 +40,8 @@
 				return LinearLogo;
 			case 'discord':
 				return DiscordLogo;
+			case 'github':
+				return '';
 			default:
 				return '';
 		}
@@ -58,7 +62,11 @@
 				<div class="flex items-center justify-between gap-2">
 					<div class="flex items-center gap-2">
 						<div class="flex h-8 w-8 items-center justify-center rounded-md bg-zinc-900">
-							<img src={getLogoSrc(integration.provider)} alt={`${integration.name} logo`} class="h-6 w-6" />
+							{#if getLogoSrc(integration.provider)}
+								<img src={getLogoSrc(integration.provider)} alt={`${integration.name} logo`} class="h-6 w-6" />
+							{:else}
+								<span class="text-xs font-semibold text-zinc-200">GH</span>
+							{/if}
 						</div>
 						<p class="text-sm font-semibold">{integration.name}</p>
 					</div>
@@ -80,9 +88,8 @@
 				<tr>
 					<th>Time</th>
 					<th>Provider</th>
-					<th>Event</th>
-					<th>Target</th>
-					<th>Result</th>
+					<th>Action</th>
+					<th>Status</th>
 					<th>Details</th>
 				</tr>
 			</thead>
@@ -92,12 +99,11 @@
 				{:else}
 					{#each data.activities as activity}
 						<tr>
-							<td class="soc-subtle">{new Date(activity.time).toLocaleString()}</td>
+							<td class="soc-subtle">{new Date(activity.created_at).toLocaleString()}</td>
 							<td class="uppercase">{activity.provider}</td>
-							<td>{activity.eventType}</td>
-							<td class="text-primary">{activity.target}</td>
-							<td><span class={`soc-badge ${resultClass(activity.result)}`}>{activity.result}</span></td>
-							<td>{activity.details}</td>
+							<td>{activity.action}</td>
+							<td><span class={`soc-badge ${resultClass(activity.status)}`}>{activity.status}</span></td>
+							<td>{activity.detail}</td>
 						</tr>
 					{/each}
 				{/if}
