@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -258,6 +259,104 @@ func (h *Handler) getScan(w http.ResponseWriter, r *http.Request) {
 		"findings": findings,
 		"logs":     logs,
 	})
+}
+
+func (h *Handler) streamScanAILogs(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	scanID, err := strconv.ParseInt(chi.URLParam(r, "scanID"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid scan id", http.StatusBadRequest)
+		return
+	}
+
+	if _, err := h.queries.GetRepositoryScanRunByIDAndUser(r.Context(), db.GetRepositoryScanRunByIDAndUserParams{UserID: userID, ID: scanID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "scan not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "failed to fetch scan", http.StatusInternalServerError)
+		return
+	}
+
+	cursor := int64(0)
+	if raw := strings.TrimSpace(r.URL.Query().Get("cursor")); raw != "" {
+		parsed, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil || parsed < 0 {
+			http.Error(w, "invalid cursor", http.StatusBadRequest)
+			return
+		}
+		cursor = parsed
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	_, _ = fmt.Fprint(w, ": connected\n\n")
+	flusher.Flush()
+
+	pollTicker := time.NewTicker(1 * time.Second)
+	heartbeatTicker := time.NewTicker(15 * time.Second)
+	defer pollTicker.Stop()
+	defer heartbeatTicker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-heartbeatTicker.C:
+			_, _ = fmt.Fprintf(w, ": heartbeat %d\n\n", time.Now().Unix())
+			flusher.Flush()
+		case <-pollTicker.C:
+			rows, queryErr := h.queries.ListRepositoryScanLogsByRunAndUserAfter(r.Context(), db.ListRepositoryScanLogsByRunAndUserAfterParams{
+				UserID:    userID,
+				ScanRunID: scanID,
+				ID:        cursor,
+			})
+			if queryErr != nil {
+				_, _ = fmt.Fprint(w, "event: error\ndata: {\"message\":\"failed to read scan logs\"}\n\n")
+				flusher.Flush()
+				continue
+			}
+
+			for _, row := range rows {
+				cursor = row.ID
+				if !isAILogRow(row.DirectoryPath, row.Message) {
+					continue
+				}
+				payload, _ := json.Marshal(map[string]any{
+					"id":             row.ID,
+					"level":          row.Level,
+					"message":        row.Message,
+					"directory_path": strings.TrimSpace(row.DirectoryPath),
+					"created_at":     timestamptzToString(row.CreatedAt),
+				})
+				_, _ = fmt.Fprintf(w, "event: log\ndata: %s\n\n", payload)
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+func isAILogRow(directoryPath, message string) bool {
+	dir := strings.ToLower(strings.TrimSpace(directoryPath))
+	if strings.HasPrefix(dir, "ai/") {
+		return true
+	}
+	msg := strings.ToLower(strings.TrimSpace(message))
+	return strings.HasPrefix(msg, "ai:")
 }
 
 func (h *Handler) listFindings(w http.ResponseWriter, r *http.Request) {

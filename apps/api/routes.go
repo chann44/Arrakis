@@ -42,6 +42,7 @@ func registerRoutes(r chi.Router, h *Handler) {
 			r.Delete("/policies/{policyID}", h.deletePolicy)
 			r.Get("/scans", h.listScans)
 			r.Get("/scans/{scanID}", h.getScan)
+			r.Get("/scans/{scanID}/ai/logs/stream", h.streamScanAILogs)
 			r.Get("/findings", h.listFindings)
 			r.Get("/findings/{findingID}", h.getFinding)
 			r.Get("/system-health/summary", h.systemHealthSummary)

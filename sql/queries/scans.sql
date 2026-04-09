@@ -395,6 +395,24 @@ WHERE r.user_id = $1
   AND l.scan_run_id = $2
 ORDER BY l.created_at ASC, l.id ASC;
 
+-- name: ListRepositoryScanLogsByRunAndUserAfter :many
+SELECT
+    l.id,
+    l.scan_run_id,
+    l.repository_id,
+    l.level,
+    l.message,
+    l.directory_path,
+    l.created_at
+FROM repository_scan_logs l
+INNER JOIN repository_scan_runs s ON s.id = l.scan_run_id
+INNER JOIN repositories r ON r.github_repo_id = s.repository_id
+WHERE r.user_id = $1
+  AND l.scan_run_id = $2
+  AND l.id > $3
+ORDER BY l.id ASC
+LIMIT 200;
+
 -- name: ListFindingsByUser :many
 SELECT
     f.id,

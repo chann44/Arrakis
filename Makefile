@@ -5,7 +5,7 @@ SQLC_CONFIG := sqlc.yaml
 BACKEND_IMAGE ?= chann44/tge-backend:latest
 WEB_IMAGE ?= chann44/tge-web:latest
 
-.PHONY: help api-dev worker-dev scheduler-dev web-dev dev test fmt codegen migrate-up migrate-down migrate-status migrate-reset migrate-create docker-build-backend docker-build-web docker-push-backend docker-push-web docker-build docker-push
+.PHONY: help api-dev worker-dev scheduler-dev web-dev ai-analyzer-dev dev test fmt codegen migrate-up migrate-down migrate-status migrate-reset migrate-create docker-build-backend docker-build-web docker-build-ai docker-push-backend docker-push-web docker-push docker-build
 
 help:
 	@printf "Available targets:\n"
@@ -14,6 +14,7 @@ help:
 	@printf "  make worker-dev        Run dependency worker\n"
 	@printf "  make scheduler-dev     Run scheduled scan dispatcher\n"
 	@printf "  make dev               Run API + web + worker dev servers\n"
+	@printf "  make ai-analyzer-dev   Run AI analyzer service\n"
 	@printf "  make test              Run Go tests\n"
 	@printf "  make fmt               Format Go code\n"
 	@printf "  make codegen           Generate sqlc code\n"
@@ -30,6 +31,9 @@ api-dev:
 
 web-dev:
 	npm --prefix apps/web run dev
+
+ai-analyzer-dev:
+	bun --cwd apps/ai-analyzer run dev
 
 worker-dev:
 	go run ./apps/worker
@@ -104,12 +108,15 @@ docker-build-backend:
 docker-build-web:
 	docker build -f deployments/docker/Dockerfile.web -t $(WEB_IMAGE) .
 
+docker-build-ai:
+	docker build -f apps/ai-analyzer/Dockerfile -t arrakis-ai-analyzer:local apps/ai-analyzer
+
 docker-push-backend:
 	docker push $(BACKEND_IMAGE)
 
 docker-push-web:
 	docker push $(WEB_IMAGE)
 
-docker-build: docker-build-backend docker-build-web
+docker-build: docker-build-backend docker-build-web docker-build-ai
 
 docker-push: docker-push-backend docker-push-web
