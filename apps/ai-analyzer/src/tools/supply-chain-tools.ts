@@ -1,5 +1,6 @@
 import { tool } from 'ai'
 import { z } from 'zod'
+import { runLoggedTool } from './logging'
 
 const SUSPICIOUS_SCRIPT_TOKENS = [
 	'curl ',
@@ -79,6 +80,17 @@ function levenshtein(a: string, b: string): number {
 
 function normalizeRegistryURL(url: string): string {
 	return url.replace(/\/+$/, '')
+}
+
+function coerceRegistryURL(input: string): string {
+	const trimmed = input.trim()
+	if (trimmed === '' || trimmed.toLowerCase() === 'npm') {
+		return 'https://registry.npmjs.org'
+	}
+	if (!/^https?:\/\//i.test(trimmed)) {
+		return `https://${trimmed}`
+	}
+	return trimmed
 }
 
 async function fetchRegistryDoc(name: string, registryURL: string): Promise<NpmRegistryPayload> {
@@ -195,33 +207,34 @@ export function createSupplyChainTools() {
 				'Fetch npm metadata for one package/version and return scripts, dependencies, and risk signals.',
 			parameters: z.object({
 				name: z.string().min(1),
-				version: z.string().optional().default(''),
-				registryURL: z.string().url().optional().default('https://registry.npmjs.org')
+				version: z.string(),
+				registryURL: z.string().min(1)
 			}),
-			execute: async ({ name, version, registryURL }) => {
-				const payload = await fetchRegistryDoc(name, registryURL)
-				const resolvedVersion = resolveVersion(payload, version)
-				if (resolvedVersion === '') {
-					throw new Error(`unable to resolve version for package '${name}'`)
-				}
+			execute: async ({ name, version, registryURL }) =>
+				runLoggedTool('analyze_npm_package', { name, version, registryURL }, async () => {
+					const payload = await fetchRegistryDoc(name, coerceRegistryURL(registryURL))
+					const resolvedVersion = resolveVersion(payload, version)
+					if (resolvedVersion === '') {
+						throw new Error(`unable to resolve version for package '${name}'`)
+					}
 
-				const targetVersion = payload.versions?.[resolvedVersion]
-				if (!targetVersion) {
-					throw new Error(`version '${resolvedVersion}' not found for package '${name}'`)
-				}
+					const targetVersion = payload.versions?.[resolvedVersion]
+					if (!targetVersion) {
+						throw new Error(`version '${resolvedVersion}' not found for package '${name}'`)
+					}
 
-				const analysis = assessVersionSignals(name, targetVersion)
+					const analysis = assessVersionSignals(name, targetVersion)
 
-				return {
-					package: name,
-					version: resolvedVersion,
-					riskLevel: summarizeRiskLevel(analysis.signals),
-					scripts: analysis.scripts,
-					dependencies: analysis.dependencies,
-					signals: analysis.signals,
-					tarballURL: targetVersion.dist?.tarball ?? ''
-				}
-			}
+					return {
+						package: name,
+						version: resolvedVersion,
+						riskLevel: summarizeRiskLevel(analysis.signals),
+						scripts: analysis.scripts,
+						dependencies: analysis.dependencies,
+						signals: analysis.signals,
+						tarballURL: targetVersion.dist?.tarball ?? ''
+					}
+				}),
 		}),
 
 		check_dependency_chain: tool({
@@ -229,12 +242,13 @@ export function createSupplyChainTools() {
 				'Recursively inspect direct and transitive dependencies and return risky nodes with short reasons.',
 			parameters: z.object({
 				name: z.string().min(1),
-				version: z.string().optional().default(''),
-				registryURL: z.string().url().optional().default('https://registry.npmjs.org'),
-				maxDepth: z.number().int().min(1).max(5).optional().default(2),
-				maxNodes: z.number().int().min(1).max(1000).optional().default(200)
+				version: z.string(),
+				registryURL: z.string().min(1),
+				maxDepth: z.number().int().min(1).max(5),
+				maxNodes: z.number().int().min(1).max(1000)
 			}),
-			execute: async ({ name, version, registryURL, maxDepth, maxNodes }) => {
+			execute: async ({ name, version, registryURL, maxDepth, maxNodes }) =>
+				runLoggedTool('check_dependency_chain', { name, version, registryURL, maxDepth, maxNodes }, async () => {
 				type QueueItem = { depName: string; depVersion: string; depth: number }
 				const queue: QueueItem[] = [{ depName: name, depVersion: version, depth: 0 }]
 				const visited = new Set<string>()
@@ -251,7 +265,7 @@ export function createSupplyChainTools() {
 					}
 					visited.add(id)
 
-					const payload = await fetchRegistryDoc(current.depName, registryURL)
+					const payload = await fetchRegistryDoc(current.depName, coerceRegistryURL(registryURL))
 					const resolvedVersion = resolveVersion(payload, current.depVersion)
 					const item = payload.versions?.[resolvedVersion]
 					if (!item) {
@@ -290,7 +304,7 @@ export function createSupplyChainTools() {
 					maxDepthReached: Math.max(0, ...flagged.map((item) => item.depth)),
 					flagged
 				}
-			}
+			})
 		}),
 
 		compare_versions: tool({
@@ -300,10 +314,11 @@ export function createSupplyChainTools() {
 				name: z.string().min(1),
 				fromVersion: z.string().min(1),
 				toVersion: z.string().min(1),
-				registryURL: z.string().url().optional().default('https://registry.npmjs.org')
+				registryURL: z.string().min(1)
 			}),
-			execute: async ({ name, fromVersion, toVersion, registryURL }) => {
-				const payload = await fetchRegistryDoc(name, registryURL)
+			execute: async ({ name, fromVersion, toVersion, registryURL }) =>
+				runLoggedTool('compare_versions', { name, fromVersion, toVersion, registryURL }, async () => {
+				const payload = await fetchRegistryDoc(name, coerceRegistryURL(registryURL))
 				const from = payload.versions?.[fromVersion]
 				const to = payload.versions?.[toVersion]
 
@@ -363,7 +378,7 @@ export function createSupplyChainTools() {
 					entryPointsChanged,
 					riskDelta
 				}
-			}
+			})
 		})
 	}
 }

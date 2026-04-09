@@ -6,8 +6,24 @@ export function hasAIModelConfig(): boolean {
 	return openAIKey !== '' || openRouterKey !== ''
 }
 
+export function getModelDebugInfo() {
+	const openAIKey = (process.env.OPENAI_API_KEY ?? '').trim()
+	const openRouterKey = (process.env.OPENROUTER_API_KEY ?? '').trim()
+	const provider = openRouterKey ? 'openrouter' : 'openai'
+	const model = (process.env.AI_ANALYZER_MODEL ?? '').trim()
+	const resolvedModel =
+		model || (provider === 'openrouter' ? 'openai/gpt-4.1-mini' : 'gpt-4.1-mini')
+
+	return {
+		provider,
+		model: resolvedModel,
+		hasOpenAIKey: openAIKey !== '',
+		hasOpenRouterKey: openRouterKey !== ''
+	}
+}
+
 export function getAIModel() {
-	const model = (process.env.AI_ANALYZER_MODEL ?? 'gpt-4.1-mini').trim()
+	const model = getModelDebugInfo().model
 	const openRouterKey = (process.env.OPENROUTER_API_KEY ?? '').trim()
 
 	if (openRouterKey) {

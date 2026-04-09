@@ -1,9 +1,11 @@
 import { generateText } from 'ai'
 import { z } from 'zod'
 import { getSupplyChainPrompt } from '../prompts'
+import { createDBFindingTools } from '../tools/db-finding-tools'
 import { createSupplyChainTools } from '../tools/supply-chain-tools'
 import type { AIFinding, DependencyInput } from '../types'
-import { getAIModel, hasAIModelConfig } from './model'
+import { formatAgentError } from './error'
+import { getAIModel, getModelDebugInfo, hasAIModelConfig } from './model'
 
 const outputSchema = z.object({
 	findings: z
@@ -65,28 +67,53 @@ function fallbackFinding(dep: DependencyInput): AIFinding[] {
 	]
 }
 
-export async function runSupplyChainAgent(dep: DependencyInput): Promise<AIFinding[]> {
+export async function runSupplyChainAgent(dep: DependencyInput, repositoryID: number): Promise<AIFinding[]> {
 	if (!hasAIModelConfig()) {
 		return fallbackFinding(dep)
 	}
 
-	const response = await generateText({
-		model: getAIModel(),
-		system: getSupplyChainPrompt(dep),
-		prompt: [
-			`Analyze package ${dep.name}@${dep.resolvedVersion || dep.versionSpec}.`,
-			'Use tools before finalizing your verdict.',
-			'Return strict JSON with shape: {"findings":[{severity,title,summary,indicator,reason,confidence,referenceURL}]}.',
-			'If there are no issues, return {"findings":[]}.',
-			`Registry: ${dep.registry}`,
-			`Manager: ${dep.manager}`
-		].join('\n'),
-		tools: createSupplyChainTools(),
-		maxSteps: 8,
-		temperature: 0
-	})
+	const debug = getModelDebugInfo()
+	let responseText = ''
 
-	const parsed = outputSchema.parse(extractJSON(response.text))
+	try {
+		const response = await generateText({
+			model: getAIModel(),
+			system: getSupplyChainPrompt(dep),
+			prompt: [
+			`Analyze package ${dep.name}@${dep.resolvedVersion || dep.versionSpec}.`,
+			'First call check_existing_ai_findings to see prior AI advisories for this dependency.',
+			'When calling tools, always send every parameter explicitly (including version, registryURL, maxDepth, maxNodes, limit).',
+			'Use registryURL=https://registry.npmjs.org and numeric defaults maxDepth=2, maxNodes=200, limit=25 when unsure.',
+			'Use tools before finalizing your verdict.',
+				'Return strict JSON with shape: {"findings":[{severity,title,summary,indicator,reason,confidence,referenceURL}]}.',
+				'If there are no issues, return {"findings":[]}.',
+				`Registry: ${dep.registry}`,
+				`Manager: ${dep.manager}`,
+				`Repository ID: ${repositoryID}`
+			].join('\n'),
+			tools: {
+				...createSupplyChainTools(),
+				...createDBFindingTools({ repositoryId: repositoryID })
+			},
+			maxSteps: 8,
+			temperature: 0
+		})
+
+		responseText = response.text
+	} catch (err) {
+		throw new Error(
+			`Provider call failed (agent=supply_chain provider=${debug.provider} model=${debug.model}): ${formatAgentError(err)}`
+		)
+	}
+
+	let parsed: z.infer<typeof outputSchema>
+	try {
+		parsed = outputSchema.parse(extractJSON(responseText))
+	} catch (err) {
+		throw new Error(
+			`Model output parse failed (agent=supply_chain provider=${debug.provider} model=${debug.model}): ${formatAgentError(err)}`
+		)
+	}
 
 	return parsed.findings.map((finding, index) => ({
 		agent: 'supply_chain',

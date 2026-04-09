@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -222,6 +225,23 @@ func runAIAnalyzerDocker(ctx context.Context, cfg *internal.Config, payload aiAn
 		args = append(args, "-e", "AI_ANALYZER_MODEL="+strings.TrimSpace(cfg.AIAnalyzerModel))
 	}
 
+	databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
+	if databaseURL == "" {
+		dbHost := strings.TrimSpace(cfg.DBHost)
+		dbPort := strings.TrimSpace(cfg.DBPort)
+		dbUser := strings.TrimSpace(cfg.DBUser)
+		dbPassword := strings.TrimSpace(cfg.DBPassword)
+		dbName := strings.TrimSpace(cfg.DBName)
+		if dbHost != "" && dbPort != "" && dbUser != "" && dbName != "" {
+			databaseURL = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", dbUser, dbPassword, dbHost, dbPort, dbName)
+		}
+	}
+	if databaseURL != "" {
+		databaseURL = rewriteDatabaseURLForDocker(databaseURL)
+		args = append(args, "-e", "DATABASE_URL="+databaseURL)
+		args = append(args, "-e", "AI_ANALYZER_DATABASE_URL="+databaseURL)
+	}
+
 	args = append(args, image, "bun", "src/job.ts")
 
 	cmd := exec.CommandContext(runCtx, "docker", args...)
@@ -244,6 +264,40 @@ func runAIAnalyzerDocker(ctx context.Context, cfg *internal.Config, payload aiAn
 	}
 
 	return &parsed, stderrLines, nil
+}
+
+func rewriteDatabaseURLForDocker(raw string) string {
+	v, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return raw
+	}
+
+	host := strings.TrimSpace(v.Hostname())
+	if !isLoopbackHost(host) {
+		return raw
+	}
+
+	port := v.Port()
+	if port == "" {
+		return raw
+	}
+
+	v.Host = net.JoinHostPort("host.docker.internal", port)
+	return v.String()
+}
+
+func isLoopbackHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
 }
 
 func linesFromOutput(value string) []string {

@@ -1,10 +1,12 @@
-import { mkdir, readFile, readdir, stat } from 'node:fs/promises'
+import { access, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { tool } from 'ai'
 import { z } from 'zod'
+import { runLoggedTool } from './logging'
 
 const MAX_FILE_BYTES = 1024 * 1024
+let latestSourceRoot = ''
 
 type NpmVersionPayload = {
 	name?: string
@@ -26,6 +28,8 @@ type NpmRegistryPayload = {
 	}
 }
 
+const DEFAULT_NPM_REGISTRY = 'https://registry.npmjs.org'
+
 type ListedFile = {
 	path: string
 	size: number
@@ -35,6 +39,17 @@ type ListedFile = {
 
 function normalizeRegistryURL(url: string): string {
 	return url.replace(/\/+$/, '')
+}
+
+function coerceRegistryURL(input: string): string {
+	const trimmed = input.trim()
+	if (trimmed === '' || trimmed.toLowerCase() === 'npm') {
+		return 'https://registry.npmjs.org'
+	}
+	if (!/^https?:\/\//i.test(trimmed)) {
+		return `https://${trimmed}`
+	}
+	return trimmed
 }
 
 async function fetchRegistryDoc(name: string, registryURL: string): Promise<NpmRegistryPayload> {
@@ -93,6 +108,30 @@ async function collectFiles(rootPath: string, limit: number): Promise<ListedFile
 	return files
 }
 
+async function pathExists(targetPath: string): Promise<boolean> {
+	try {
+		await access(targetPath)
+		return true
+	} catch {
+		return false
+	}
+}
+
+async function resolveSourceRoot(candidate: string): Promise<string> {
+	if (await pathExists(candidate)) {
+		return candidate
+	}
+
+	if (latestSourceRoot !== '' && (await pathExists(latestSourceRoot))) {
+		console.warn(
+			`[ai-tool] rootPath '${candidate}' not found, using latestSourceRoot '${latestSourceRoot}'`
+		)
+		return latestSourceRoot
+	}
+
+	throw new Error(`source root does not exist: ${candidate}`)
+}
+
 function isPathInsideRoot(rootPath: string, targetPath: string): boolean {
 	const relative = path.relative(rootPath, targetPath)
 	if (relative === '') return true
@@ -145,11 +184,12 @@ export function createCodeAnalysisTools() {
 			description: 'Fetch package manifest metadata without downloading full source.',
 			parameters: z.object({
 				name: z.string().min(1),
-				version: z.string().optional().default(''),
-				registryURL: z.string().url().optional().default('https://registry.npmjs.org')
+				version: z.string(),
+				registryURL: z.string().min(1)
 			}),
-			execute: async ({ name, version, registryURL }) => {
-				const payload = await fetchRegistryDoc(name, registryURL)
+			execute: async ({ name, version, registryURL }) =>
+				runLoggedTool('fetch_package_manifest', { name, version, registryURL }, async () => {
+				const payload = await fetchRegistryDoc(name, coerceRegistryURL(registryURL))
 				const resolvedVersion = resolveVersion(payload, version)
 				if (!resolvedVersion) {
 					throw new Error(`unable to resolve version for '${name}'`)
@@ -172,40 +212,41 @@ export function createCodeAnalysisTools() {
 					},
 					tarballURL: manifest.dist?.tarball ?? ''
 				}
-			}
+			})
 		}),
 
 		fetch_package_source: tool({
 			description: 'Download and extract npm package source into a temp workspace.',
 			parameters: z.object({
 				name: z.string().min(1),
-				version: z.string().optional().default('latest')
+				version: z.string()
 			}),
-			execute: async ({ name, version }) => {
+			execute: async ({ name, version }) => runLoggedTool('fetch_package_source', { name, version }, async () => {
 				const workspace = path.join(os.tmpdir(), 'arrakis-ai-analyzer', `${Date.now()}`)
 				await mkdir(workspace, { recursive: true })
-				const packageRef = `${name}@${version}`
+				const payload = await fetchRegistryDoc(name, DEFAULT_NPM_REGISTRY)
+				const resolvedVersion = resolveVersion(payload, version)
+				if (!resolvedVersion) {
+					throw new Error(`unable to resolve version for '${name}'`)
+				}
 
-				const pack = Bun.spawn(['npm', 'pack', packageRef, '--silent'], {
-					cwd: workspace,
-					stdout: 'pipe',
-					stderr: 'pipe'
+				const manifest = payload.versions?.[resolvedVersion]
+				const tarballURL = manifest?.dist?.tarball?.trim() ?? ''
+				if (!manifest || tarballURL === '') {
+					throw new Error(`tarball not found for '${name}@${resolvedVersion}'`)
+				}
+
+				const tarballResponse = await fetch(tarballURL, {
+					method: 'GET'
 				})
-
-				const [packExitCode, packStdout, packStderr] = await Promise.all([
-					pack.exited,
-					new Response(pack.stdout).text(),
-					new Response(pack.stderr).text()
-				])
-
-				if (packExitCode !== 0) {
-					throw new Error(`npm pack failed: ${packStderr.trim() || 'unknown error'}`)
+				if (!tarballResponse.ok) {
+					throw new Error(`tarball download failed with status ${tarballResponse.status}`)
 				}
 
-				const tarballName = packStdout.trim().split('\n').at(-1)?.trim()
-				if (!tarballName) {
-					throw new Error('npm pack did not return a tarball name')
-				}
+				const tarballBuffer = Buffer.from(await tarballResponse.arrayBuffer())
+				const safeName = name.replace(/[^a-zA-Z0-9._-]/g, '-')
+				const tarballName = `${safeName}-${resolvedVersion}.tgz`
+				await writeFile(path.join(workspace, tarballName), tarballBuffer)
 
 				const extractPath = path.join(workspace, 'source')
 				await mkdir(extractPath, { recursive: true })
@@ -226,6 +267,7 @@ export function createCodeAnalysisTools() {
 				}
 
 				const sourceRoot = path.join(extractPath, 'package')
+				latestSourceRoot = sourceRoot
 				const files = await collectFiles(sourceRoot, 5000)
 
 				return {
@@ -234,23 +276,24 @@ export function createCodeAnalysisTools() {
 					fileCount: files.length,
 					files
 				}
-			}
+			})
 		}),
 
 		list_files: tool({
 			description: 'List files recursively under a source root.',
 			parameters: z.object({
 				rootPath: z.string().min(1),
-				limit: z.number().int().min(1).max(10000).optional().default(2000)
+				limit: z.number().int().min(1).max(10000)
 			}),
-			execute: async ({ rootPath, limit }) => {
-				const files = await collectFiles(rootPath, limit)
+			execute: async ({ rootPath, limit }) => runLoggedTool('list_files', { rootPath, limit }, async () => {
+				const resolvedRoot = await resolveSourceRoot(rootPath)
+				const files = await collectFiles(resolvedRoot, limit)
 				return {
-					rootPath,
+					rootPath: resolvedRoot,
 					count: files.length,
 					files
 				}
-			}
+			})
 		}),
 
 		read_file: tool({
@@ -258,22 +301,24 @@ export function createCodeAnalysisTools() {
 			parameters: z.object({
 				rootPath: z.string().min(1),
 				filePath: z.string().min(1),
-				maxBytes: z.number().int().min(1).max(5 * 1024 * 1024).optional().default(MAX_FILE_BYTES)
+				maxBytes: z.number().int().min(1).max(5 * 1024 * 1024)
 			}),
-			execute: async ({ rootPath, filePath, maxBytes }) => {
-				const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(rootPath, filePath)
-				if (!isPathInsideRoot(rootPath, absolutePath)) {
+			execute: async ({ rootPath, filePath, maxBytes }) =>
+				runLoggedTool('read_file', { rootPath, filePath, maxBytes }, async () => {
+				const resolvedRoot = await resolveSourceRoot(rootPath)
+				const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(resolvedRoot, filePath)
+				if (!isPathInsideRoot(resolvedRoot, absolutePath)) {
 					throw new Error('file path is outside of rootPath')
 				}
 
 				const content = await readFile(absolutePath, 'utf8')
 				const truncated = content.length > maxBytes
 				return {
-					filePath: path.relative(rootPath, absolutePath),
+					filePath: path.relative(resolvedRoot, absolutePath),
 					truncated,
 					content: truncated ? content.slice(0, maxBytes) : content
 				}
-			}
+			})
 		}),
 
 		search_source: tool({
@@ -281,11 +326,13 @@ export function createCodeAnalysisTools() {
 			parameters: z.object({
 				rootPath: z.string().min(1),
 				pattern: z.string().min(1),
-				isRegex: z.boolean().optional().default(true),
-				maxMatches: z.number().int().min(1).max(5000).optional().default(200)
+				isRegex: z.boolean(),
+				maxMatches: z.number().int().min(1).max(5000)
 			}),
-			execute: async ({ rootPath, pattern, isRegex, maxMatches }) => {
-				const files = await collectFiles(rootPath, 4000)
+			execute: async ({ rootPath, pattern, isRegex, maxMatches }) =>
+				runLoggedTool('search_source', { rootPath, pattern, isRegex, maxMatches }, async () => {
+				const resolvedRoot = await resolveSourceRoot(rootPath)
+				const files = await collectFiles(resolvedRoot, 4000)
 				const matcher = isRegex ? new RegExp(pattern, 'g') : null
 				const matches: Array<{ file: string; line: number; text: string }> = []
 
@@ -293,7 +340,7 @@ export function createCodeAnalysisTools() {
 					if (file.isDirectory) continue
 					if (file.size > MAX_FILE_BYTES) continue
 
-					const absolutePath = path.join(rootPath, file.path)
+					const absolutePath = path.join(resolvedRoot, file.path)
 					const content = await readFile(absolutePath, 'utf8')
 					const lines = content.split('\n')
 
@@ -304,23 +351,25 @@ export function createCodeAnalysisTools() {
 
 						matches.push({ file: file.path, line: index + 1, text: lineText.trim().slice(0, 250) })
 						if (matches.length >= maxMatches) {
-							return { rootPath, pattern, totalMatches: matches.length, matches }
+							return { rootPath: resolvedRoot, pattern, totalMatches: matches.length, matches }
 						}
 					}
 				}
 
-				return { rootPath, pattern, totalMatches: matches.length, matches }
-			}
+				return { rootPath: resolvedRoot, pattern, totalMatches: matches.length, matches }
+			})
 		}),
 
 		scan_binary_content: tool({
 			description: 'Detect potentially encoded or high-entropy blobs in files.',
 			parameters: z.object({
 				rootPath: z.string().min(1),
-				maxFiles: z.number().int().min(1).max(10000).optional().default(1500)
+				maxFiles: z.number().int().min(1).max(10000)
 			}),
-			execute: async ({ rootPath, maxFiles }) => {
-				const files = await collectFiles(rootPath, maxFiles)
+			execute: async ({ rootPath, maxFiles }) =>
+				runLoggedTool('scan_binary_content', { rootPath, maxFiles }, async () => {
+				const resolvedRoot = await resolveSourceRoot(rootPath)
+				const files = await collectFiles(resolvedRoot, maxFiles)
 				const suspicious: Array<{
 					file: string
 					entropy: number
@@ -330,7 +379,7 @@ export function createCodeAnalysisTools() {
 				for (const file of files) {
 					if (file.isDirectory || file.size > MAX_FILE_BYTES) continue
 
-					const absolutePath = path.join(rootPath, file.path)
+					const absolutePath = path.join(resolvedRoot, file.path)
 					const text = await readFile(absolutePath, 'utf8').catch(() => '')
 					if (text === '') continue
 
@@ -345,11 +394,11 @@ export function createCodeAnalysisTools() {
 				}
 
 				return {
-					rootPath,
+					rootPath: resolvedRoot,
 					suspicious,
 					scannedFiles: files.length
 				}
-			}
+			})
 		}),
 
 		decode_and_analyze: tool({
@@ -357,7 +406,7 @@ export function createCodeAnalysisTools() {
 			parameters: z.object({
 				value: z.string().min(1)
 			}),
-			execute: async ({ value }) => {
+			execute: async ({ value }) => runLoggedTool('decode_and_analyze', { value }, async () => {
 				const decoded = decodeMaybeEncoded(value)
 				return {
 					decoded,
@@ -366,7 +415,7 @@ export function createCodeAnalysisTools() {
 					containsURL: /https?:\/\//i.test(decoded),
 					containsShellLikeTokens: /(curl|wget|bash|powershell|nc\s)/i.test(decoded)
 				}
-			}
+			})
 		})
 	}
 }

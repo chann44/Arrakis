@@ -105,7 +105,18 @@ export const actions: Actions = {
 					timezone: String(form.get('trigger_timezone') ?? 'UTC').trim()
 				}
 			],
-			sources: defaultSourcesPayload
+			sources: defaultSourcesPayload,
+			sast: {
+				enabled: true,
+				patterns_enabled: true,
+				rulesets: ['default'],
+				min_severity: 'medium',
+				exclude_paths: [],
+				ai_enabled: has(form, 'ai_enabled'),
+				ai_max_files_per_scan: 50,
+				ai_reachability: true,
+				ai_suggest_fix: true
+			}
 		};
 
 		const response = await fetch(`${API_BASE_URL}/v1/policies`, {

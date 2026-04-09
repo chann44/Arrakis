@@ -43,6 +43,37 @@ services:
     networks:
       - tge_dev_net
 
+  ai-analyzer:
+    image: ${TGE_AI_ANALYZER_IMAGE:-arrakis-ai-analyzer:local}
+    build:
+      context: ../apps/ai-analyzer
+      dockerfile: Dockerfile
+    environment:
+      PORT: "8090"
+      REDIS_URL: redis://redis:6379
+      AI_ANALYZER_DATABASE_URL: postgres://${DB_USER:-dev}:${DB_PASSWORD:-dev}@postgres:5432/${DB_NAME:-app}?sslmode=disable
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-}
+      OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-arrakis}
+      AI_ANALYZER_MODEL: ${AI_ANALYZER_MODEL:-gpt-4.1-mini}
+      AI_ANALYZER_TOKEN: ${AI_ANALYZER_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_started
+    ports:
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - tge_dev_net
+
 volumes:
   postgres_data:
   redis_data:

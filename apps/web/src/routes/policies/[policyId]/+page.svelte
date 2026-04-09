@@ -47,6 +47,7 @@
 					<div class="flex items-center justify-between"><span class="soc-subtle">OSV</span><span>{policy.sources.osv_enabled ? 'on' : 'off'}</span></div>
 					<div class="flex items-center justify-between"><span class="soc-subtle">GHSA</span><span>{policy.sources.ghsa_enabled ? 'on' : 'off'}</span></div>
 					<div class="flex items-center justify-between"><span class="soc-subtle">NVD</span><span>{policy.sources.nvd_enabled ? 'on' : 'off'}</span></div>
+					<div class="flex items-center justify-between"><span class="soc-subtle">AI Analysis</span><span>{policy.sast?.ai_enabled ? 'on' : 'off'}</span></div>
 				</div>
 
 				<Dialog.Root bind:open={editPolicyDialogOpen}>
@@ -126,6 +127,10 @@
 								<p class="soc-subtle mt-1">
 									Sources, SAST, and registry settings stay unchanged in this modal and can remain configured through backend policy fields.
 								</p>
+								<label class="mt-2 inline-flex items-center gap-2 text-xs font-medium">
+									<input type="checkbox" name="ai_enabled" checked={policy.sast?.ai_enabled} />
+									Enable AI analysis for this policy
+								</label>
 							</section>
 
 							<div class="flex items-center justify-end gap-2">

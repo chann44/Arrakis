@@ -92,6 +92,10 @@
 						<p class="soc-subtle mt-1">
 							OSV, GHSA, NVD, and govulncheck are enabled by default.
 						</p>
+						<label class="mt-2 inline-flex items-center gap-2 text-xs font-medium">
+							<input type="checkbox" name="ai_enabled" checked />
+							Enable AI analysis for this policy
+						</label>
 					</section>
 
 					<div class="flex items-center justify-end gap-2 pt-2">

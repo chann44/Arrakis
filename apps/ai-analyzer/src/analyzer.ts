@@ -1,6 +1,9 @@
 import { runCodeAnalysisAgent } from './agents/code-analysis-agent'
+import { getModelDebugInfo, hasAIModelConfig } from './agents/model'
 import { runSupplyChainAgent } from './agents/supply-chain-agent'
 import { initializeSandbox, teardownSandbox } from './snadbox'
+import type { ToolTraceEvent } from './tools/logging'
+import { withToolTrace } from './tools/logging'
 import type {
 	AILogStep,
 	AnalyzeRepositoryRequest,
@@ -21,6 +24,38 @@ function addStep(
 	})
 }
 
+function addToolTraceSteps(
+	steps: AILogStep[],
+	stage: 'supply_chain' | 'code_analysis',
+	packageName: string,
+	events: ToolTraceEvent[]
+) {
+	for (const event of events) {
+		const status = event.phase === 'error' ? 'error' : 'progress'
+		const detail =
+			event.phase === 'start'
+				? `tool ${event.name} started`
+				: event.phase === 'success'
+					? `tool ${event.name} succeeded in ${event.durationMs ?? 0}ms`
+					: `tool ${event.name} failed: ${event.error ?? 'unknown error'}`
+
+		addStep(steps, {
+			stage,
+			status,
+			packageName,
+			message: detail,
+			metadata: {
+				tool: event.name,
+				phase: event.phase,
+				durationMs: event.durationMs ?? 0,
+				args: event.args ? JSON.stringify(event.args).slice(0, 300) : '',
+				result: event.result ? JSON.stringify(event.result).slice(0, 300) : '',
+				error: event.error ?? ''
+			}
+		})
+	}
+}
+
 export async function analyzeRepository(
 	request: AnalyzeRepositoryRequest
 ): Promise<AnalyzeRepositoryResponse> {
@@ -39,6 +74,17 @@ export async function analyzeRepository(
 			scanRunId: request.scanRunId,
 			repoId: request.repoId,
 			dependencyCount: selected.length
+		}
+	})
+
+	const modelDebug = getModelDebugInfo()
+	addStep(steps, {
+		stage: 'queued',
+		status: 'progress',
+		message: `ai provider config provider=${modelDebug.provider} model=${modelDebug.model} hasModelKey=${hasAIModelConfig()}`,
+		metadata: {
+			hasOpenAIKey: modelDebug.hasOpenAIKey,
+			hasOpenRouterKey: modelDebug.hasOpenRouterKey
 		}
 	})
 
@@ -78,7 +124,9 @@ export async function analyzeRepository(
 			})
 
 			try {
-				const supplyFindings = await runSupplyChainAgent(dep)
+				const traced = await withToolTrace(() => runSupplyChainAgent(dep, request.repoId))
+				addToolTraceSteps(steps, 'supply_chain', dep.name, traced.events)
+				const supplyFindings = traced.result
 				findings.push(...supplyFindings)
 				addStep(steps, {
 					stage: 'supply_chain',
@@ -117,7 +165,9 @@ export async function analyzeRepository(
 			})
 
 			try {
-				const codeFindings = await runCodeAnalysisAgent(dep)
+				const traced = await withToolTrace(() => runCodeAnalysisAgent(dep, request.repoId))
+				addToolTraceSteps(steps, 'code_analysis', dep.name, traced.events)
+				const codeFindings = traced.result
 				findings.push(...codeFindings)
 				addStep(steps, {
 					stage: 'code_analysis',
