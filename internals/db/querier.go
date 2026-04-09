@@ -76,6 +76,7 @@ type Querier interface {
 	ListRepositoryScanFindingSourcesByRunAndUser(ctx context.Context, arg ListRepositoryScanFindingSourcesByRunAndUserParams) ([]ListRepositoryScanFindingSourcesByRunAndUserRow, error)
 	ListRepositoryScanFindingsByRunAndUser(ctx context.Context, arg ListRepositoryScanFindingsByRunAndUserParams) ([]ListRepositoryScanFindingsByRunAndUserRow, error)
 	ListRepositoryScanLogsByRunAndUser(ctx context.Context, arg ListRepositoryScanLogsByRunAndUserParams) ([]RepositoryScanLog, error)
+	ListRepositoryScanLogsByRunAndUserAfter(ctx context.Context, arg ListRepositoryScanLogsByRunAndUserAfterParams) ([]RepositoryScanLog, error)
 	ListRepositoryScanRunsByRepoAndUser(ctx context.Context, arg ListRepositoryScanRunsByRepoAndUserParams) ([]ListRepositoryScanRunsByRepoAndUserRow, error)
 	ListRepositoryScanRunsByUser(ctx context.Context, userID int64) ([]ListRepositoryScanRunsByUserRow, error)
 	ListScheduledPolicyRepositoryTargets(ctx context.Context) ([]ListScheduledPolicyRepositoryTargetsRow, error)

@@ -1036,6 +1036,59 @@ func (q *Queries) ListRepositoryScanLogsByRunAndUser(ctx context.Context, arg Li
 	return items, nil
 }
 
+const listRepositoryScanLogsByRunAndUserAfter = `-- name: ListRepositoryScanLogsByRunAndUserAfter :many
+SELECT
+    l.id,
+    l.scan_run_id,
+    l.repository_id,
+    l.level,
+    l.message,
+    l.directory_path,
+    l.created_at
+FROM repository_scan_logs l
+INNER JOIN repository_scan_runs s ON s.id = l.scan_run_id
+INNER JOIN repositories r ON r.github_repo_id = s.repository_id
+WHERE r.user_id = $1
+  AND l.scan_run_id = $2
+  AND l.id > $3
+ORDER BY l.id ASC
+LIMIT 200
+`
+
+type ListRepositoryScanLogsByRunAndUserAfterParams struct {
+	UserID    int64 `json:"user_id"`
+	ScanRunID int64 `json:"scan_run_id"`
+	ID        int64 `json:"id"`
+}
+
+func (q *Queries) ListRepositoryScanLogsByRunAndUserAfter(ctx context.Context, arg ListRepositoryScanLogsByRunAndUserAfterParams) ([]RepositoryScanLog, error) {
+	rows, err := q.db.Query(ctx, listRepositoryScanLogsByRunAndUserAfter, arg.UserID, arg.ScanRunID, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RepositoryScanLog
+	for rows.Next() {
+		var i RepositoryScanLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.ScanRunID,
+			&i.RepositoryID,
+			&i.Level,
+			&i.Message,
+			&i.DirectoryPath,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRepositoryScanRunsByRepoAndUser = `-- name: ListRepositoryScanRunsByRepoAndUser :many
 SELECT
     s.id,

@@ -25,6 +25,9 @@ type PolicyDetail = {
 		nvd_api_key_ref: string;
 		govulncheck_enabled: boolean;
 	};
+	sast: {
+		ai_enabled: boolean;
+	};
 	repositories: Array<{
 		repository_id: number;
 		full_name: string;
@@ -122,7 +125,10 @@ export const actions: Actions = {
 				}
 			],
 			sources: currentPolicy.sources,
-			sast: currentPolicy.sast,
+			sast: {
+				...currentPolicy.sast,
+				ai_enabled: has(form, 'ai_enabled')
+			},
 			registry: currentPolicy.registry
 		};
 

@@ -24,6 +24,7 @@ type policySourceConfig struct {
 	GHSAEnabled        bool
 	NVDEnabled         bool
 	SupplyChainEnabled bool
+	AIAnalysisEnabled  bool
 	GHSAToken          string
 	NVDAPIKey          string
 }
@@ -138,6 +139,42 @@ func RunRepositoryScan(ctx context.Context, queries *db.Queries, cfg *internal.C
 		logScanEvent(ctx, queries, logger, scanRunID, repoID, "info", "supply-chain analysis skipped (disabled by env or policy)", "")
 	}
 
+	if shouldRunAIAnalyzer(cfg.AIAnalyzerEnabled, sourceCfg.AIAnalysisEnabled) {
+		logScanAIEvent(ctx, queries, logger, scanRunID, repoID, "info", "ai:queued:start preparing sandboxed AI analysis", "ai/queued")
+		logScanAIEvent(ctx, queries, logger, scanRunID, repoID, "info", "ai:sandbox:start starting analyzer sandbox container", "ai/sandbox")
+
+		aiResponse, sandboxLogs, aiErr := runAIAnalyzer(ctx, cfg, scanRunID, repoID, allDeps)
+		for _, line := range sandboxLogs {
+			logScanAIEvent(ctx, queries, logger, scanRunID, repoID, "info", "ai:sandbox:progress "+line, "ai/sandbox")
+		}
+
+		if aiErr != nil {
+			logScanAIEvent(ctx, queries, logger, scanRunID, repoID, "warn", "ai:sandbox:error "+truncateForDB(aiErr.Error(), 2000), "ai/sandbox")
+		} else {
+			logScanAIEvent(ctx, queries, logger, scanRunID, repoID, "info", "ai:sandbox:success sandbox analysis completed", "ai/sandbox")
+			for _, step := range aiResponse.Steps {
+				level := "info"
+				if strings.EqualFold(step.Status, "error") {
+					level = "error"
+				}
+				message := "ai:" + strings.TrimSpace(step.Stage) + ":" + strings.TrimSpace(step.Status) + " " + strings.TrimSpace(step.Message)
+				if strings.TrimSpace(step.PackageName) != "" {
+					message += " (package=" + strings.TrimSpace(step.PackageName) + ")"
+				}
+				logScanAIEvent(ctx, queries, logger, scanRunID, repoID, level, message, "ai/"+strings.TrimSpace(step.Stage))
+			}
+
+			mergeAIFindingsIntoMap(aiResponse, findingMap)
+			logScanAIEvent(ctx, queries, logger, scanRunID, repoID, "info", fmt.Sprintf("ai:finalize:success merged %d AI finding(s)", len(aiResponse.Findings)), "ai/finalize")
+		}
+	} else {
+		reason := "disabled by env"
+		if shouldRunAIAnalyzer(cfg.AIAnalyzerEnabled, true) && !sourceCfg.AIAnalysisEnabled {
+			reason = "disabled by policy"
+		}
+		logScanAIEvent(ctx, queries, logger, scanRunID, repoID, "info", "ai:queued:progress AI analyzer skipped ("+reason+")", "ai/queued")
+	}
+
 	logScanEvent(ctx, queries, logger, scanRunID, repoID, "info", "enriching findings with GHSA/NVD", "")
 	if err := enrichFindingsFromProviders(ctx, sourceCfg, findingMap); err != nil {
 		logScanEvent(ctx, queries, logger, scanRunID, repoID, "error", "provider enrichment failed: "+truncateForDB(err.Error(), 2000), "")
@@ -226,6 +263,17 @@ func logScanEvent(ctx context.Context, queries *db.Queries, logger *adapters.Cen
 			"scan_run_id":    scanRunID,
 			"repository_id":  repoID,
 			"directory_path": dir,
+		})
+	}
+}
+
+func logScanAIEvent(ctx context.Context, queries *db.Queries, logger *adapters.CentralLogger, scanRunID, repoID int64, level, message, directory string) {
+	logScanEvent(ctx, queries, logger, scanRunID, repoID, level, message, directory)
+	if logger != nil {
+		logger.Log(ctx, "ai-analyzer", sanitizeLogLevel(level), strings.TrimSpace(message), map[string]any{
+			"scan_run_id":    scanRunID,
+			"repository_id":  repoID,
+			"directory_path": strings.TrimSpace(directory),
 		})
 	}
 }
@@ -1298,6 +1346,7 @@ func resolvePolicyForScan(ctx context.Context, queries *db.Queries, cfg *interna
 		GHSAEnabled:        true,
 		NVDEnabled:         true,
 		SupplyChainEnabled: false,
+		AIAnalysisEnabled:  true,
 		GHSAToken:          strings.TrimSpace(cfg.GHSAAPIToken),
 		NVDAPIKey:          strings.TrimSpace(cfg.NVDAPIKey),
 	}
@@ -1316,7 +1365,23 @@ func resolvePolicyForScan(ctx context.Context, queries *db.Queries, cfg *interna
 	policyID := pgtype.Int8{Int64: policy.ID, Valid: true}
 	sources, err := queries.GetPolicySourcesByPolicy(ctx, policy.ID)
 	if err != nil {
-		return policyID, defaultConfig
+		if err == pgx.ErrNoRows {
+			sources = db.PolicySource{
+				PolicyID:           policy.ID,
+				OsvEnabled:         defaultConfig.OSVEnabled,
+				GhsaEnabled:        defaultConfig.GHSAEnabled,
+				NvdEnabled:         defaultConfig.NVDEnabled,
+				SupplyChainEnabled: defaultConfig.SupplyChainEnabled,
+			}
+		} else {
+			return policyID, defaultConfig
+		}
+	}
+
+	aiAnalysisEnabled := false
+	sast, err := queries.GetPolicySastByPolicy(ctx, policy.ID)
+	if err == nil {
+		aiAnalysisEnabled = sast.AiEnabled
 	}
 
 	return policyID, policySourceConfig{
@@ -1324,6 +1389,7 @@ func resolvePolicyForScan(ctx context.Context, queries *db.Queries, cfg *interna
 		GHSAEnabled:        sources.GhsaEnabled,
 		NVDEnabled:         sources.NvdEnabled,
 		SupplyChainEnabled: sources.SupplyChainEnabled,
+		AIAnalysisEnabled:  aiAnalysisEnabled,
 		GHSAToken:          firstNonEmpty(strings.TrimSpace(sources.GhsaTokenRef), strings.TrimSpace(cfg.GHSAAPIToken)),
 		NVDAPIKey:          firstNonEmpty(strings.TrimSpace(sources.NvdApiKeyRef), strings.TrimSpace(cfg.NVDAPIKey)),
 	}
@@ -1403,6 +1469,10 @@ func normalizeScanTrigger(trigger string) string {
 	default:
 		return "manual"
 	}
+}
+
+func shouldRunAIAnalyzer(envEnabled, policyEnabled bool) bool {
+	return envEnabled && policyEnabled
 }
 
 func resolvedVersionForDependency(dep db.ListRepositoryDependenciesDetailedRow) string {

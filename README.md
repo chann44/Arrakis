@@ -26,6 +26,7 @@ Our goal is to make open source much safer and make package registries more appr
 ## 🧱 Tech stack
 
 - Go (backend)
+- Bun + Hono + Vercel AI SDK (sandboxed AI analyzer)
 - Postgres (metadata)
 - Redis (jobs / queues)
 - Docker (self-hosted deployment)
@@ -51,6 +52,15 @@ docker compose -f deployments/dev.compose.yml up -d
 ```
 
 API: `http://localhost:8080`
+
+Optional AI analyzer (sandbox mode):
+
+```bash
+make docker-build-ai
+AI_ANALYZER_ENABLED=true AI_ANALYZER_MODE=docker make worker-dev
+```
+
+Scan details now include an **AI Analysis** tab with step-by-step logs from sandbox startup, agent progress, and finding merge events.
 
 ## 🚢 Self-host with published images
 

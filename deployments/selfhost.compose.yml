@@ -142,10 +142,39 @@ services:
       REDIS_PORT: "6379"
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "9000"
+      AI_ANALYZER_MODE: http
+      AI_ANALYZER_URL: http://ai-analyzer:8090
     command: ["/usr/local/bin/worker"]
     depends_on:
       api:
         condition: service_healthy
+      ai-analyzer:
+        condition: service_started
+    networks:
+      - tge_net
+
+  ai-analyzer:
+    image: ${TGE_AI_ANALYZER_IMAGE:-arrakis-ai-analyzer:local}
+    build:
+      context: ../apps/ai-analyzer
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      PORT: "8090"
+      REDIS_URL: redis://redis:6379
+      AI_ANALYZER_DATABASE_URL: postgres://${DB_USER:-dev}:${DB_PASSWORD:-dev}@postgres:5432/${DB_NAME:-app}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     networks:
       - tge_net
 
