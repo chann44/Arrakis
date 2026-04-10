@@ -1,5 +1,5 @@
 {
-  "name": "marketing",
+  "name": "docs",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -10,15 +10,12 @@
   },
   "dependencies": {
     "@types/mdx": "^2.0.13",
-    "@types/three": "^0.183.1",
     "fumadocs-core": "^16.7.11",
     "fumadocs-mdx": "^14.2.11",
     "fumadocs-ui": "^16.7.11",
-    "gsap": "^3.14.2",
     "next": "16.2.3",
     "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "three": "^0.183.2"
+    "react-dom": "19.2.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

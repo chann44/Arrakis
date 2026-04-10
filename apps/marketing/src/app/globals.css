@@ -1,3 +1,5 @@
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
 @import "tailwindcss";
 
 :root {
@@ -360,4 +362,104 @@ body {
   .tiers {
     grid-template-columns: 1fr;
   }
+}
+
+/* ─── Fumadocs / Arrakis dark theme overrides ─── */
+/* Applied on :root and .dark — light mode is intentionally disabled */
+:root,
+.dark {
+  color-scheme: dark;
+
+  /* Fumadocs design tokens */
+  --fd-background: #1D1818;
+  --fd-foreground: #E8E4E3;
+  --fd-muted: #332E2D;
+  --fd-muted-foreground: #959190;
+  --fd-border: rgba(255, 255, 255, 0.10);
+  --fd-ring: #FAD9D3;
+  --fd-primary: #FAD9D3;
+  --fd-primary-foreground: #1D1818;
+  --fd-secondary: #332E2D;
+  --fd-secondary-foreground: #E8E4E3;
+  --fd-accent: #332E2D;
+  --fd-accent-foreground: #FAD9D3;
+  --fd-card: #231F1F;
+  --fd-card-foreground: #E8E4E3;
+  --fd-popover: #231F1F;
+  --fd-popover-foreground: #E8E4E3;
+  --fd-sidebar: #1A1616;
+  --fd-sidebar-foreground: #E8E4E3;
+
+  /* Override any fumadocs-neutral light defaults */
+  --background: #1D1818;
+  --foreground: #E8E4E3;
+  --card: #231F1F;
+  --card-foreground: #E8E4E3;
+  --popover: #231F1F;
+  --popover-foreground: #E8E4E3;
+  --primary: #FAD9D3;
+  --primary-foreground: #1D1818;
+  --secondary: #332E2D;
+  --secondary-foreground: #E8E4E3;
+  --muted: #332E2D;
+  --muted-foreground: #959190;
+  --accent: #332E2D;
+  --accent-foreground: #FAD9D3;
+  --border: rgba(255, 255, 255, 0.10);
+  --ring: #FAD9D3;
+}
+
+/* Dot-grid background on docs pages */
+.fumadocs-layout {
+  background-image: radial-gradient(circle, rgba(255,255,255,0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
+  background-color: #1D1818;
+}
+
+/* Nav brand font */
+.fumadocs-layout [data-slot="nav"] {
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  background: rgba(29,24,24,0.85);
+  backdrop-filter: blur(12px);
+}
+
+/* Sidebar */
+.fumadocs-layout [data-slot="sidebar"] {
+  border-right: 1px solid rgba(255,255,255,0.08);
+  background: #1A1616;
+}
+
+/* Active sidebar item uses clay accent */
+[data-active="true"] {
+  color: #FAD9D3 !important;
+  background: rgba(250,217,211,0.08) !important;
+}
+
+/* Headings use DotGothic16 */
+.fumadocs-layout h1,
+.fumadocs-layout h2,
+.fumadocs-layout h3 {
+  font-family: 'DotGothic16', monospace;
+  letter-spacing: 0.02em;
+}
+
+/* Inline code */
+.fumadocs-layout :not(pre) > code {
+  background: rgba(250,217,211,0.08);
+  color: #FAD9D3;
+  border: 1px solid rgba(250,217,211,0.2);
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+}
+
+/* Code blocks */
+.fumadocs-layout pre {
+  background: #140F0F !important;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+/* Callouts */
+.fumadocs-layout [data-callout] {
+  border-left-color: #FAD9D3;
+  background: rgba(250,217,211,0.05);
 }

@@ -1,0 +1,102 @@
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+@import 'tailwindcss';
+
+/* ── Arrakis dark theme ── */
+:root,
+.dark {
+  color-scheme: dark;
+
+  /* fumadocs design tokens */
+  --fd-background:          #1a1616;
+  --fd-foreground:          #E8E4E3;
+  --fd-muted:               #252121;
+  --fd-muted-foreground:    #8a8787;
+  --fd-border:              rgba(255,255,255,0.08);
+  --fd-ring:                #FAD9D3;
+  --fd-primary:             #FAD9D3;
+  --fd-primary-foreground:  #1a1616;
+  --fd-secondary:           #252121;
+  --fd-secondary-foreground:#E8E4E3;
+  --fd-accent:              #252121;
+  --fd-accent-foreground:   #FAD9D3;
+  --fd-card:                #1e1a1a;
+  --fd-card-foreground:     #E8E4E3;
+  --fd-popover:             #1e1a1a;
+  --fd-popover-foreground:  #E8E4E3;
+  --fd-sidebar:             #141111;
+  --fd-sidebar-foreground:  #E8E4E3;
+
+  /* shadcn tokens */
+  --background:            #1a1616;
+  --foreground:            #E8E4E3;
+  --muted:                 #252121;
+  --muted-foreground:      #8a8787;
+  --border:                rgba(255,255,255,0.08);
+  --primary:               #FAD9D3;
+  --primary-foreground:    #1a1616;
+  --card:                  #1e1a1a;
+  --card-foreground:       #E8E4E3;
+  --popover:               #1e1a1a;
+  --popover-foreground:    #E8E4E3;
+  --accent:                #252121;
+  --accent-foreground:     #FAD9D3;
+  --ring:                  #FAD9D3;
+}
+
+/* Base */
+body {
+  font-family: var(--font-inter, 'Inter', system-ui, sans-serif);
+  background-color: var(--fd-background);
+  color: var(--fd-foreground);
+}
+
+/* ── TOC clerk-style: active items use clay color ── */
+/* The TOC progress line */
+[data-toc-item][data-active='true'],
+[data-toc-item][aria-current='true'] {
+  color: #FAD9D3 !important;
+}
+
+/* ── Code blocks: plain box, NO syntax highlighting override ── */
+/* Keep fumadocs default code block styles but ensure background is dark */
+pre {
+  background: #110d0d !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  border-radius: 8px;
+}
+
+/* Inline code: clay tint */
+:not(pre) > code {
+  background: rgba(250,217,211,0.07) !important;
+  color: #FAD9D3 !important;
+  border: 1px solid rgba(250,217,211,0.15) !important;
+  border-radius: 4px;
+  padding: 0.1em 0.4em;
+  font-size: 0.875em;
+}
+
+/* Code blocks that are plain text (no language / bash without color) */
+pre:has(code.language-text),
+pre:has(code:not([class*='language-'])) {
+  background: #110d0d !important;
+}
+
+pre:has(code.language-text) code,
+pre:has(code:not([class*='language-'])) code {
+  color: #E8E4E3 !important;
+}
+
+/* ── Callouts ── */
+[data-callout] {
+  background: rgba(250,217,211,0.04) !important;
+  border-color: rgba(250,217,211,0.25) !important;
+}
+
+/* ── Hide copy button on code blocks ── */
+[data-rehype-pretty-code-figure] button,
+pre button,
+.fd-codeblock button,
+[data-copy-button] {
+  display: none !important;
+}

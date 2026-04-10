@@ -8,7 +8,6 @@ import ProblemSection from "@/components/ProblemSection";
 import MethodologySection from "@/components/MethodologySection";
 import StatsSection from "@/components/StatsSection";
 import ParadigmSection from "@/components/ParadigmSection";
-import MarqueeSection from "@/components/MarqueeSection";
 import TiersSection from "@/components/TiersSection";
 import CTASection from "@/components/CTASection";
 
@@ -41,7 +40,6 @@ export default function Home() {
         <MethodologySection />
         <StatsSection />
         <ParadigmSection />
-        <MarqueeSection />
         <TiersSection />
         <CTASection />
       </main>

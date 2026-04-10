@@ -1,0 +1,69 @@
+---
+title: Introduction
+description: Arrakis is a self-hosted, open-source supply chain security platform for teams that care about what they ship.
+---
+
+## What is Arrakis?
+
+Arrakis is a supply chain security platform designed to give engineering teams a clear, accurate picture of the risk hiding in their open-source dependencies.
+
+Most apps ship thousands of packages they never directly chose — transitive dependencies pulled in by the things they did choose. Arrakis maps that entire graph, queries every relevant advisory database, and surfaces the findings that actually matter before they reach production.
+
+<Callout type="info">
+  Arrakis is fully open-source and self-hosted. Your dependency data never leaves your infrastructure.
+</Callout>
+
+## Why it exists
+
+The open source ecosystem is enormous and largely unaudited. Vulnerabilities get published months after discovery. Supply chain attacks — typosquatting, dependency confusion, malicious install scripts — are increasing in frequency. Existing tools check only your direct dependencies, miss transitive exposure, and produce mountains of noise that teams learn to ignore.
+
+Arrakis was built to solve three specific problems:
+
+**1. Transitive blindness.** Your `package.json` has 40 deps. Those 40 deps have 4,000 more. Arrakis builds the full graph to depth 4 and scans all of it.
+
+**2. Multi-source deduplication.** The same CVE appears in OSV, GHSA, and NVD with different IDs and slightly different metadata. Arrakis deduplicates across all sources and shows you one finding with full provenance.
+
+**3. Supply chain signals beyond CVEs.** A package can be dangerous before anyone files a CVE. Arrakis detects install scripts, typosquats, dependency confusion patterns, version anomalies, and abandoned packages — and scores them on a risk model.
+
+## Core capabilities
+
+| Capability | Details |
+|---|---|
+| **Dependency graph** | Transitive traversal to depth 4 across npm, pip, Go modules |
+| **Vulnerability scanning** | OSV, GHSA, NVD, govulncheck, custom feeds |
+| **Supply chain analysis** | Typosquatting, install scripts, dependency confusion, version anomalies |
+| **AI analysis** | Sandboxed container-based semantic risk analysis |
+| **Policy engine** | Per-repo scan policy with configurable advisory sources and triggers |
+| **Scheduled scanning** | Cron-based automated scans with per-timezone support |
+| **Integrations** | GitHub Issues, Jira, Linear, Slack, Discord |
+| **Self-hosted** | Docker Compose or Kubernetes, Traefik TLS, custom domains |
+
+## Architecture overview
+
+Arrakis is composed of four services:
+
+```
+┌──────────┐    ┌──────────┐    ┌─────────────┐    ┌─────────────┐
+│   API    │    │  Worker  │    │  Scheduler  │    │ AI Analyzer │
+│ :8080    │───▶│ (asynq)  │◀───│  (cron)     │    │ (Docker)    │
+└──────────┘    └──────────┘    └─────────────┘    └─────────────┘
+      │                │                                    ▲
+      ▼                ▼                                    │
+┌──────────┐    ┌──────────┐                               │
+│ Postgres │    │  Redis   │───────────────────────────────┘
+└──────────┘    └──────────┘
+```
+
+- **API** — REST server handling authentication, repository management, policy CRUD, and findings queries.
+- **Worker** — Async job processor. Runs dependency syncs and vulnerability scans from a Redis-backed queue.
+- **Scheduler** — Evaluates cron expressions for all active policies every 30 seconds and enqueues scans.
+- **AI Analyzer** — Optional sandboxed container that performs semantic dependency risk analysis using LLMs.
+
+## Next steps
+
+<Cards>
+  <Card title="Quickstart" href="/docs/quickstart" description="Connect your first repo and run a scan in under 5 minutes." />
+  <Card title="Self-hosting" href="/docs/self-hosting" description="Deploy Arrakis on your own infrastructure with Docker Compose." />
+  <Card title="Policy Engine" href="/docs/policies" description="Configure what gets scanned, when, and against which advisory sources." />
+  <Card title="Risk Scoring" href="/docs/risk-scoring" description="Understand how Arrakis scores supply chain risk signals." />
+</Cards>

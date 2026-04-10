@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { RootProvider } from "fumadocs-ui/provider/next";
+import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -7,13 +9,9 @@ export const metadata: Metadata = {
     "Arrakis is a self-hosted, open-source supply chain security platform. Scan dependencies, detect vulnerabilities, and make open source safer.",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark" suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
@@ -26,7 +24,16 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body suppressHydrationWarning>
+        <RootProvider
+          theme={{
+            defaultTheme: "dark",
+            forcedTheme: "dark",
+          }}
+        >
+          {children}
+        </RootProvider>
+      </body>
     </html>
   );
 }

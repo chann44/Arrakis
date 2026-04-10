@@ -3,7 +3,16 @@
     "allow": [
       "Bash(bun create:*)",
       "Bash(bun add:*)",
-      "Bash(bun run:*)"
+      "Bash(bun run:*)",
+      "Bash(ls:*)",
+      "Bash(grep -r \"type.*struct\" /Users/nisargthakkar/Projects/tge/TGE/services/*.go)",
+      "WebFetch(domain:fumadocs.dev)",
+      "Bash(bun --version)",
+      "Bash(bunx --yes create-fumadocs-app --help)",
+      "Bash(bunx create-next-app@16 docs --typescript --tailwind --app --src-dir --import-alias \"@/*\" --no-turbopack --no-git)",
+      "Bash(grep -rl '^\\\\`\\\\`\\\\`$' content/docs/)",
+      "Bash(node -e \"const t = require\\('./node_modules/fumadocs-ui/dist/layouts/shared.js'\\); console.log\\(Object.keys\\(t\\)\\)\")",
+      "Bash(grep -rn '```text$' apps/docs/content/docs/)"
     ]
   }
 }
