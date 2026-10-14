@@ -1,80 +1,88 @@
+<div align="center">
+
+<img src="assets/logo.png" width="200" alt="Arrakis">
+
 # Arrakis
 
-Arrakis is a self-hosted, open-source supply chain security platform.
+**A self-hosted, open-source supply chain security platform.**
 
-Our goal is to make open source much safer and make package registries more approachable and trustworthy for every team and community that depends on them.
+[![Go](https://img.shields.io/badge/go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Postgres](https://img.shields.io/badge/db-Postgres-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Redis](https://img.shields.io/badge/queues-Redis-DC382D?logo=redis&logoColor=white)](https://redis.io/)
+[![Docker](https://img.shields.io/badge/deploy-Docker-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![License](https://img.shields.io/badge/license-MIT-21bb4a.svg)](#license)
 
-## 🚀 What it does
+*Scan dependencies. Surface CVEs. Flag the weird stuff before it ships.*
 
-- Scans your repo dependencies (direct + transitive)
-- Detects known vulnerabilities (CVE / OSV)
-- Flags risky patterns:
-  - new/untrusted packages
-  - suspicious install scripts
-  - dependency confusion risks
+</div>
+
+> [!NOTE]
+> Early stage project — APIs and schema may change. PRs and feedback welcome.
+
+## What it does
+
+- Scans repo dependencies, direct and transitive (npm, pip, go)
+- Detects known vulnerabilities (CVE / OSV / GHSA / NVD)
+- Flags risky patterns — new or untrusted packages, suspicious install scripts, dependency confusion
 - Tracks dependency changes over time
-- Generates simple risk reports
+- Generates risk reports, with an optional sandboxed AI analyzer
 
-## ⚙️ How it works
+## How it works
 
 1. Connect your GitHub repo
-2. Extract dependency manifests (npm, pip, go, etc.)
-3. Build dependency graph
-4. Run scanners + rule engine
-5. Output findings with risk score
+2. Extract dependency manifests (npm, pip, go)
+3. Build the dependency graph
+4. Run scanners and the rule engine — plus sandboxed agents (supply chain agent, SCA agent) in isolated containers
+5. Get findings with a risk score
 
-## 🧱 Tech stack
+## Tech stack
 
-- Go (backend)
-- Bun + Hono + Vercel AI SDK (sandboxed AI analyzer)
-- Postgres (metadata)
-- Redis (jobs / queues)
-- Docker (self-hosted deployment)
+- **Go** — API, worker, scheduler, risk engine
+- **Bun + Hono + Vercel AI SDK** — sandboxed AI analyzer
+- **Postgres** — metadata, **Redis** — jobs and queues, **ClickHouse** — log streaming
+- **Docker + Traefik** — self-hosted deployment
 
-## 🏗️ Project structure
+## Project structure
 
 ```text
-apps/        # api, worker, web
-domain/      # core models (dependency, scan, findings)
-services/    # parsing, scanning, risk engine
-adapters/    # github, osv, registries
-deployments/ # docker / k8s
+apps/         # api, worker, scheduler, ai-analyzer, web, marketing
+services/     # parsing, scanning, risk engine, notifier
+adapters/     # github, osv, nvd, ghsa, package registries, clickhouse
+internals/    # auth, config, jobs, observability
+deployments/  # docker compose files for dev and self-hosting
+sql/          # migrations (sqlc)
 ```
 
-## 🐳 Run locally (dev dependencies only)
+## Run locally
 
 ```bash
-git clone git@github.com:chann44/TGE.git
-cd arrakis
-
+git clone git@github.com:chann44/Arrakis.git
+cd Arrakis
 cp .env.example .env
 docker compose -f deployments/dev.compose.yml up -d
 ```
 
 API: `http://localhost:8080`
 
-Optional AI analyzer (sandbox mode):
+Optional AI analyzer in sandbox mode:
 
 ```bash
 make docker-build-ai
 AI_ANALYZER_ENABLED=true AI_ANALYZER_MODE=docker make worker-dev
 ```
 
-Scan details now include an **AI Analysis** tab with step-by-step logs from sandbox startup, agent progress, and finding merge events.
+Scan details include an **AI Analysis** tab with step-by-step logs from sandbox startup, agent progress, and finding merge events.
 
-## 🚢 Self-host with published images
+## Self-host with published images
 
 ```bash
-git clone git@github.com:chann44/TGE.git
-cd arrakis
-
+git clone git@github.com:chann44/Arrakis.git
+cd Arrakis
 cp .env.example .env
 docker compose -f deployments/selfhost.compose.yml up -d
 ```
 
-Self-host compose uses Traefik and serves web + API on one domain (`/` and `/api`).
-
-Set these required values in `.env` before startup:
+The self-host compose uses Traefik and serves web + API on one domain (`/` and `/api`). Set these required values in `.env` before startup:
 
 ```bash
 TRAEFIK_ACME_EMAIL=ops@example.com
@@ -82,20 +90,12 @@ DOMAIN_RECORD_TYPE=A
 DOMAIN_RECORD_VALUE=<your-server-public-ip>
 ```
 
-Then open `http://<server-ip>/settings` and add your domain in the dashboard.
-The app will show DNS records you need to set:
-
-- TXT ownership record: `_tge-challenge.<your-domain>`
-- Traffic record: `A` (or `CNAME` if configured)
-
-After DNS propagation, click Verify in the dashboard. Traefik will publish HTTPS routes automatically.
+Then open `http://<server-ip>/settings` and add your domain in the dashboard. The app shows the DNS records to set — a TXT ownership record (`_tge-challenge.<your-domain>`) and a traffic record (`A`, or `CNAME` if configured). After DNS propagation, click Verify in the dashboard and Traefik publishes HTTPS routes automatically.
 
 Infrastructure requirements:
 
 - Open inbound ports `80` and `443` on your host/cloud firewall
 - Ensure your DNS points to `DOMAIN_RECORD_VALUE`
-
-Traefik terminates TLS automatically with Let's Encrypt.
 
 Default images used by compose:
 
@@ -104,7 +104,7 @@ chann44/tge-backend:latest
 chann44/tge-web:latest
 ```
 
-To publish updated images to Docker Hub:
+Publish updated images to Docker Hub:
 
 ```bash
 docker login
@@ -112,10 +112,9 @@ make docker-build
 make docker-push
 ```
 
-Automated publish is also configured via GitHub Actions in `.github/workflows/docker-publish.yml`.
-Push a tag like `v1.0.0` to publish multi-arch images to Docker Hub.
+Automated publishing is configured via GitHub Actions in `.github/workflows/docker-publish.yml` — push a tag like `v1.0.0` to publish multi-arch images.
 
-To use another registry/image name, override:
+To use another registry, override the image names:
 
 ```bash
 export TGE_BACKEND_IMAGE=your-registry/your-namespace/tge-backend:latest
@@ -123,17 +122,7 @@ export TGE_WEB_IMAGE=your-registry/your-namespace/tge-web:latest
 docker compose -f deployments/selfhost.compose.yml up -d
 ```
 
-For system-health log streaming, set these `.env` values:
-
-```bash
-CLICKHOUSE_HOST=localhost
-CLICKHOUSE_PORT=9000
-CLICKHOUSE_USER=default
-CLICKHOUSE_PASSWORD=clickhouse
-CLICKHOUSE_DATABASE=default
-```
-
-## 📌 Roadmap
+## Roadmap
 
 - GitHub App integration
 - CI integration (fail on high risk)
@@ -141,14 +130,6 @@ CLICKHOUSE_DATABASE=default
 - Advanced heuristic rules engine
 - Dashboard + alerts
 
-## ⚠️ Status
+## License
 
-Early stage project - APIs and schema may change.
-
-## 🤝 Contributing
-
-PRs and feedback welcome.
-
-## 📄 License
-
-MIT
+[MIT](#license) © 2026 [Chann](https://github.com/chann44)
